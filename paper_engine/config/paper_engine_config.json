@@ -1,0 +1,31 @@
+{
+  "env": "prod",
+  "kafka": {
+    "bootstrap_servers": "localhost:9092",
+    "group_id": "paper-engine",
+    "signals_topic": "signals.vwap",
+    "candles_topic": "candles.1m",
+    "trades_topic": "trades.paper",
+    "pnl_topic": "pnl.paper",
+    "commit_interval_ms": 1000
+  },
+  "log": {
+    "level": "INFO",
+    "file": "logs/paper_engine.log"
+  },
+  "trading": {
+    "timezone": "Asia/Kolkata",
+    "entry_start": "09:20",
+    "entry_end": "15:15",
+    "eod_flat_time": "15:20",
+    "mtm_snapshot_interval_sec": 60
+  },
+  "risk": {
+    "capital_per_trade": 10000.0,
+    "max_trades_per_day": 10,
+    "max_open_positions": 3,
+    "max_daily_loss": 2000.0,
+    "per_trade_sl_pct": 0.5,
+    "per_trade_target_pct": 1.0
+  }
+}

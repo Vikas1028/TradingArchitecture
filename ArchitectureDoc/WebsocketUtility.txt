@@ -1,0 +1,493 @@
+You are an expert Python backend and trading-systems developer.
+
+I want you to build a robust, production-quality WebSocket market data feed service that:
+
+- Connects to Angel One SmartAPI WebSocket.
+- Logs in using a dedicated login module.
+- Subscribes to live ticks for a configured list of instruments (NIFTY, BANKNIFTY, and some equities).
+- Normalizes the raw WS messages into a clean internal Tick schema.
+- Publishes each tick as JSON to a Kafka topic called "ticks.raw".
+- Uses a JSON config file: python_feed/config/ws_feed_config.json
+- Handles reconnects, resubscription, graceful shutdown, and basic logging.
+- Is split into small modules under a clear folder hierarchy.
+
+DO NOT implement any trading or strategy logic. This service only forwards normalized ticks to Kafka.
+
+For EVERY function you write:
+- Add a comment block immediately BEFORE the function definition that explains:
+  - What the function does
+  - What inputs it takes
+  - What it returns
+  - How it fits into the flow
+
+=====================================================================
+0. PROJECT STRUCTURE (MUST FOLLOW)
+=====================================================================
+
+Root layout (inside your utilities repo):
+
+python_feed/
+  __init__.py
+
+  main/
+    __init__.py
+    main.py              # entrypoint, wires everything together
+
+  config/
+    ws_feed_config.json  # JSON configuration file
+
+  log/
+    __init__.py
+    logger_setup.py      # logging setup logic
+
+  internal/
+    __init__.py
+
+    config/
+      __init__.py
+      config_loader.py   # load + validate config
+
+    kafka/
+      __init__.py
+      kafka_producer.py  # KafkaTickProducer wrapper
+
+    websocket/
+      __init__.py
+      angel_ws_client.py # WebSocket connection + tick handling
+
+    login/
+      __init__.py
+      smartapi_login.py  # Angel SmartAPI login / session management
+
+    health/
+      __init__.py
+      health.py          # health stats tracking
+
+logs/
+  (created at runtime by logger)
+
+The **main entrypoint** for the process will be:
+- `python_feed/main/main.py`
+
+=====================================================================
+1. CONFIG FILE FORMAT (MUST MATCH)
+=====================================================================
+
+Config path: python_feed/config/ws_feed_config.json
+
+Example:
+
+{
+  "env": "prod",
+
+  "angel": {
+    "api_key": "YOUR_API_KEY_HERE",
+    "client_id": "YOUR_CLIENT_ID_HERE",
+    "refresh_token": "YOUR_REFRESH_TOKEN_HERE",
+    "feed_token": "YOUR_FEED_TOKEN_HERE",
+    "debug": false
+  },
+
+  "kafka": {
+    "bootstrap_servers": "localhost:9092",
+    "topic": "ticks.raw",
+    "acks": "1",
+    "linger_ms": 5,
+    "batch_size": 32768
+  },
+
+  "symbols": {
+    "indices": [
+      "NSE:NIFTY50-INDEX",
+      "NSE:NIFTYBANK-INDEX"
+    ],
+    "equities": [
+      "NSE:RELIANCE-EQ",
+      "NSE:HDFCBANK-EQ",
+      "NSE:ICICIBANK-EQ",
+      "NSE:TCS-EQ",
+      "NSE:INFY-EQ"
+    ]
+  },
+
+  "log": {
+    "level": "INFO",
+    "file": "logs/ws_feed_service.log"
+  },
+
+  "reconnect": {
+    "max_retries": 0,
+    "backoff_seconds": 5
+  },
+
+  "health": {
+    "print_stats_interval_sec": 60
+  }
+}
+
+Requirements:
+
+- Load this JSON on startup.
+- Use these sections: "angel", "kafka", "symbols", "log", "reconnect", "health".
+- If something is missing:
+  - Use a sane default where possible.
+  - Log a WARNING.
+  - If critical (like Kafka bootstrap_servers), raise an error.
+
+=====================================================================
+2. INTERNAL TICK SCHEMA (NORMALIZED FORMAT)
+=====================================================================
+
+Every WS tick MUST be normalized to this dict before sending to Kafka:
+
+{
+  "symbol": "RELIANCE",
+  "exchange": "NSE",
+  "time": "2025-12-07T09:21:32.123+05:30",
+  "ltp": 2710.25,
+  "volume": 200,
+  "bid": 2709.9,
+  "ask": 2710.4
+}
+
+Rules:
+
+- symbol:
+  - Short, clean: "RELIANCE", "HDFCBANK", "NIFTY", "BANKNIFTY".
+  - Derived from config instruments like "NSE:RELIANCE-EQ".
+- exchange:
+  - Example: "NSE".
+- time:
+  - ISO 8601 string with timezone, e.g. datetime.now().astimezone().isoformat().
+  - Prefer broker timestamp if reliable.
+- ltp:
+  - Last traded price as float.
+- volume:
+  - Incremental trade size or 0 if not available.
+- bid / ask:
+  - If not provided, set to 0.
+
+All Kafka messages on topic "ticks.raw" MUST follow this schema.
+
+=====================================================================
+3. MODULE RESPONSIBILITIES (BY FOLDER)
+=====================================================================
+
+------------------------------------------------------------
+3.1 internal/config/config_loader.py
+------------------------------------------------------------
+
+Purpose:
+- Load and validate JSON config from python_feed/config/ws_feed_config.json.
+- Ensure required fields exist.
+- Make sure logs directory exists.
+
+Functions (each with a comment block before it):
+
+- load_config(path: str) -> dict
+  - Reads and parses JSON.
+  - Validates:
+    - angel.api_key
+    - angel.client_id
+    - angel.refresh_token
+    - kafka.bootstrap_servers
+    - kafka.topic
+  - Ensures log path directory exists.
+  - Raises ValueError on invalid config.
+
+Optionally:
+- define small TypedDicts / dataclasses for angel/kafka/log sections.
+
+------------------------------------------------------------
+3.2 log/logger_setup.py
+------------------------------------------------------------
+
+Purpose:
+- Centralized logging configuration.
+
+Function:
+
+- setup_logging(level: str, file: str) -> logging.Logger
+  - Configures a root logger.
+  - Adds:
+    - FileHandler (path = file)
+    - StreamHandler (stdout)
+  - Format:
+    - "[YYYY-MM-DD HH:MM:SS] LEVEL module message"
+  - Respects log level param.
+
+Add a **comment block before the function** explaining the flow.
+
+------------------------------------------------------------
+3.3 internal/kafka/kafka_producer.py
+------------------------------------------------------------
+
+Purpose:
+- Wrap Kafka Producer to send normalized ticks to "ticks.raw".
+
+Class: KafkaTickProducer
+
+Methods (each with a comment block explaining flow):
+
+- __init__(bootstrap_servers: str, topic: str, acks: str, linger_ms: int, batch_size: int, logger: logging.Logger)
+  - Create a confluent_kafka.Producer with given settings.
+
+- send_tick(tick: dict) -> None
+  - JSON-encode tick.
+  - Produce to topic with key=tick["symbol"].
+  - Use delivery callback to log success/failure.
+
+- flush() -> None
+  - Flush Kafka producer.
+
+- close() -> None
+  - Flush and clean up resources.
+
+Rules:
+- Log producer errors.
+- Do not crash the entire service for a single delivery error.
+
+------------------------------------------------------------
+3.4 internal/login/smartapi_login.py
+------------------------------------------------------------
+
+Purpose:
+- Encapsulate Angel SmartAPI login and token/session handling.
+- Keep WS client logic separate from login, so you can change login behavior later easily.
+
+Functions / Class:
+
+- function or class method like:
+  - create_angel_session(angel_cfg: dict, logger: logging.Logger) -> Any
+    - Logs in using:
+      - api_key
+      - client_id
+      - refresh_token
+      - feed_token (if needed)
+    - Returns an authenticated Angel client/session object to be used by WebSocket.
+
+Before the function, add a comment block explaining login steps and error behavior.
+
+If actual SDK details are unknown:
+- Use a placeholder AngelClient class with TODO comments.
+- But keep structure ready.
+
+------------------------------------------------------------
+3.5 internal/websocket/angel_ws_client.py
+------------------------------------------------------------
+
+Purpose:
+- Handle WebSocket connection to Angel.
+- Subscribe to configured instruments.
+- Receive raw ticks.
+- Normalize them.
+- Forward them to a provided tick_handler callback.
+
+Class: AngelWSClient
+
+Attributes:
+- cfg: dict
+- logger: logging.Logger
+- tick_handler: Callable[[dict], None]
+- token_mapping: dict[int, tuple[str, str]]  # token -> (symbol, exchange)
+- angel_session / angel_ws: underlying SmartAPI WS client
+- connected: bool
+
+Methods (each with a comment block explaining flow):
+
+- __init__(cfg, logger, tick_handler, token_mapping)
+  - Store parameters.
+  - Prepare for connection (but don’t connect yet).
+
+- connect() -> None
+  - Use smartapi_login.create_angel_session() to get a session.
+  - Initialize WS client from the session.
+  - Register WS callbacks (on_open, on_message, on_error, on_close).
+  - Start or prepare WS connection (depending on SDK style).
+
+- disconnect() -> None
+  - Close the WebSocket connection cleanly.
+  - Update connected flag.
+
+- subscribe(instruments: list[str]) -> None
+  - Translate instrument identifiers (e.g., "NSE:RELIANCE-EQ") to tokens or whatever Angel expects.
+  - Send subscription request over WS.
+
+- run_forever(shutdown_event: threading.Event) -> None
+  - Start/enter WS event loop.
+  - Continue receiving messages until shutdown_event is set.
+  - For each WS tick message:
+    - Normalize it (see below).
+    - Call tick_handler(normalized_tick).
+  - If WS error or disconnect occurs:
+    - Log the error.
+    - Raise an exception to let the outer reconnect loop handle it.
+
+Tick Normalization (in a helper method inside this class):
+
+- normalize_tick(raw_msg: Any) -> Optional[dict]
+  - Extract instrument token or identifier.
+  - Map token → (symbol, exchange) using token_mapping.
+  - Extract:
+    - last traded price
+    - incremental volume if available
+    - bid/ask if available
+    - timestamp
+  - Build dict matching the internal Tick schema.
+  - Return tick dict.
+  - If mapping fails or message invalid:
+    - Log warning.
+    - Return None.
+
+Ignore:
+- Heartbeats / pings / non-tick messages.
+
+------------------------------------------------------------
+3.6 internal/health/health.py
+------------------------------------------------------------
+
+Purpose:
+- Track and log basic health metrics (ticks count, TPS, connection status).
+
+Class: HealthMonitor
+
+Methods (each with a comment block explaining flow):
+
+- __init__(logger: logging.Logger, interval_sec: int)
+  - Initialize counters: total_ticks, last_total_ticks, last_report_time.
+  - Store interval and logger.
+  - connected flag default False.
+
+- on_tick() -> None
+  - Increment total_ticks.
+
+- set_connected(value: bool) -> None
+  - Update connection status.
+
+- maybe_report() -> None
+  - If interval has passed:
+    - Calculate ticks per second since last report.
+    - Log:
+      - "health: ticks=<total>, tps=<tps>, connected=<bool>"
+    - Update last_report_time and last_total_ticks.
+
+=====================================================================
+4. MAIN ENTRYPOINT – python_feed/main/main.py
+=====================================================================
+
+Purpose:
+- Wire everything.
+- Control lifecycle, reconnect loop, and shutdown.
+
+Function: main()  (with comment block explaining full flow)
+
+Steps:
+
+1) Load config:
+   - Use internal.config.config_loader.load_config("python_feed/config/ws_feed_config.json").
+
+2) Setup logging:
+   - Use log.logger_setup.setup_logging(config["log"]["level"], config["log"]["file"]).
+   - Get a logger instance (e.g., logger = logging.getLogger("ws_feed_service")).
+
+3) Initialize KafkaTickProducer:
+   - From internal.kafka.kafka_producer.KafkaTickProducer with config["kafka"].
+
+4) Build instruments + token mapping:
+   - For now:
+     - build list of instrument strings from config["symbols"]["indices"] + ["equities"].
+     - token mapping can be stubbed or manually defined (TODO with SmartAPI dump later).
+
+5) Create shutdown_event = threading.Event().
+
+6) Create HealthMonitor:
+   - Using internal.health.health.HealthMonitor(logger, config["health"]["print_stats_interval_sec"]).
+
+7) Define tick_handler(tick: dict):
+   - Comment block: explain that this is the central path from WS to Kafka.
+   - Call health_monitor.on_tick()
+   - Call kafka_producer.send_tick(tick)
+
+8) Create AngelWSClient:
+   - angel_client = AngelWSClient(cfg=config, logger=logger, tick_handler=tick_handler, token_mapping=token_mapping)
+
+9) Register signal handlers:
+   - For SIGINT and SIGTERM:
+     - Handler sets shutdown_event.
+     - Logs that shutdown was requested.
+
+10) Reconnect loop:
+
+   - Read backoff_seconds and max_retries from config["reconnect"].
+   - Pseudocode:
+
+     retries = 0
+     while not shutdown_event.is_set():
+         try:
+             logger.info("Connecting to Angel WebSocket...")
+             angel_client.connect()
+             health_monitor.set_connected(True)
+
+             # Loop until shutdown_event is set or WS breaks
+             angel_client.run_forever(shutdown_event)
+
+             health_monitor.set_connected(False)
+             # If run_forever exited without shutdown flag, treat as error
+             if not shutdown_event.is_set():
+                 raise RuntimeError("WebSocket loop exited unexpectedly")
+
+         except Exception as e:
+             logger.exception("WebSocket loop crashed: %s", e)
+             health_monitor.set_connected(False)
+             retries += 1
+             if max_retries > 0 and retries > max_retries:
+                 logger.error("Max retries exceeded, exiting main loop")
+                 break
+             time.sleep(backoff_seconds)
+             continue
+
+     # on exit from loop
+     logger.info("Shutdown requested, closing connections...")
+     angel_client.disconnect()
+     kafka_producer.flush()
+     logger.info("Shutdown complete")
+
+11) Call main() under the standard guard:
+
+   if __name__ == "__main__":
+       main()
+
+=====================================================================
+5. CODING RULES
+=====================================================================
+
+- Python 3.10+.
+- Use type hints for all public functions and method signatures.
+- BEFORE every function and method:
+  - Add a comment block that explains:
+    - What it does
+    - Parameters
+    - Return value
+    - How it fits into overall flow
+
+- Keep modules small and focused, as defined above.
+- Do not mix login logic inside the WebSocket module.
+- Do not mix Kafka logic inside WebSocket or login modules.
+- Use TODO comments where real Angel SDK details are missing, but keep the structure correct.
+
+=====================================================================
+6. NON-GOALS (DON'T IMPLEMENT THESE HERE)
+=====================================================================
+
+- No strategy rules.
+- No order placement or trading.
+- No VWAP or candle building.
+- No database writes.
+- No UI.
+
+This service is ONLY:
+  Angel SmartAPI WS → Normalize ticks → Kafka "ticks.raw".
+
+=====================================================================
+END OF SPEC
+=====================================================================

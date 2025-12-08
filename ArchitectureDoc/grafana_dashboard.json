@@ -1,0 +1,213 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": {
+          "type": "grafana",
+          "uid": "-- Grafana --"
+        },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "id": null,
+  "iteration": 1,
+  "links": [],
+  "liveNow": false,
+  "panels": [
+    {
+      "type": "row",
+      "title": "python_feed",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 }
+    },
+    {
+      "type": "gauge",
+      "title": "WS Connected",
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 1 },
+      "targets": [
+        { "expr": "python_feed_ws_connected", "legendFormat": "" }
+      ],
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] } }
+    },
+    {
+      "type": "gauge",
+      "title": "Kafka Connected",
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 1 },
+      "targets": [
+        { "expr": "python_feed_kafka_connected", "legendFormat": "" }
+      ],
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] } }
+    },
+    {
+      "type": "timeseries",
+      "title": "Ticks Received/s",
+      "gridPos": { "h": 6, "w": 12, "x": 12, "y": 1 },
+      "targets": [
+        { "expr": "rate(python_feed_ticks_received_total[5m])", "legendFormat": "recv/s" },
+        { "expr": "rate(python_feed_ticks_published_total[5m])", "legendFormat": "pub/s" }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "WS Reconnects & Errors",
+      "gridPos": { "h": 6, "w": 12, "x": 0, "y": 5 },
+      "targets": [
+        { "expr": "increase(python_feed_ws_reconnects_total[5m])", "legendFormat": "reconnects" },
+        { "expr": "increase(python_feed_errors_total[5m])", "legendFormat": "errors" }
+      ]
+    },
+
+    {
+      "type": "row",
+      "title": "marketdata",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 11 }
+    },
+    {
+      "type": "gauge",
+      "title": "Kafka In Connected",
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 12 },
+      "targets": [
+        { "expr": "marketdata_kafka_in_connected", "legendFormat": "" }
+      ],
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] } }
+    },
+    {
+      "type": "gauge",
+      "title": "Kafka Out Connected",
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 12 },
+      "targets": [
+        { "expr": "marketdata_kafka_out_connected", "legendFormat": "" }
+      ],
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] } }
+    },
+    {
+      "type": "timeseries",
+      "title": "Ticks Consumed/s",
+      "gridPos": { "h": 6, "w": 12, "x": 12, "y": 12 },
+      "targets": [
+        { "expr": "rate(marketdata_ticks_consumed_total[5m])", "legendFormat": "ticks/s" }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Candles Emitted/s",
+      "gridPos": { "h": 6, "w": 12, "x": 0, "y": 16 },
+      "targets": [
+        { "expr": "rate(marketdata_candles_emitted_total[5m])", "legendFormat": "candles/s" }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Errors",
+      "gridPos": { "h": 6, "w": 12, "x": 12, "y": 16 },
+      "targets": [
+        { "expr": "increase(marketdata_errors_total[5m])", "legendFormat": "errors" }
+      ]
+    },
+
+    {
+      "type": "row",
+      "title": "vwap_strategy",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 22 }
+    },
+    {
+      "type": "gauge",
+      "title": "Service Up",
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 23 },
+      "targets": [
+        { "expr": "vwap_strategy_up", "legendFormat": "" }
+      ],
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] } }
+    },
+    {
+      "type": "timeseries",
+      "title": "Candles Consumed/s",
+      "gridPos": { "h": 6, "w": 12, "x": 6, "y": 23 },
+      "targets": [
+        { "expr": "rate(vwap_strategy_candles_consumed_total[5m])", "legendFormat": "candles/s" }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Signals Emitted/s",
+      "gridPos": { "h": 6, "w": 12, "x": 18, "y": 23 },
+      "targets": [
+        { "expr": "rate(vwap_strategy_signals_emitted_total[5m])", "legendFormat": "signals/s" }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Errors",
+      "gridPos": { "h": 6, "w": 12, "x": 0, "y": 29 },
+      "targets": [
+        { "expr": "increase(vwap_strategy_errors_total[5m])", "legendFormat": "errors" }
+      ]
+    },
+
+    {
+      "type": "row",
+      "title": "paper_engine",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 35 }
+    },
+    {
+      "type": "gauge",
+      "title": "Trading Halted",
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 36 },
+      "targets": [
+        { "expr": "paper_engine_trading_halted", "legendFormat": "" }
+      ],
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] } }
+    },
+    {
+      "type": "timeseries",
+      "title": "Signals Consumed/s",
+      "gridPos": { "h": 6, "w": 12, "x": 6, "y": 36 },
+      "targets": [
+        { "expr": "rate(paper_engine_signals_consumed_total[5m])", "legendFormat": "signals/s" }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Trades Emitted/s",
+      "gridPos": { "h": 6, "w": 12, "x": 18, "y": 36 },
+      "targets": [
+        { "expr": "rate(paper_engine_trades_emitted_total[5m])", "legendFormat": "trades/s" }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "PnL Snapshots/s",
+      "gridPos": { "h": 6, "w": 12, "x": 0, "y": 42 },
+      "targets": [
+        { "expr": "rate(paper_engine_pnl_snapshots_total[5m])", "legendFormat": "snapshots/s" }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Errors",
+      "gridPos": { "h": 6, "w": 12, "x": 12, "y": 42 },
+      "targets": [
+        { "expr": "increase(paper_engine_errors_total[5m])", "legendFormat": "errors" }
+      ]
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 38,
+  "style": "dark",
+  "tags": ["trading", "services", "prometheus"],
+  "templating": { "list": [] },
+  "time": { "from": "now-1h", "to": "now" },
+  "timezone": "",
+  "title": "Trading Services Status",
+  "uid": null,
+  "version": 1,
+  "weekStart": ""
+}

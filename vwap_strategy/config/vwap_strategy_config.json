@@ -1,0 +1,27 @@
+{
+  "env": "prod",
+  "kafka": {
+    "bootstrap_servers": "localhost:9092",
+    "group_id": "vwap-strategy",
+    "stock_candles_topic": "candles.1m",
+    "index_candles_topic": "indices.1m",
+    "signal_topic": "signals.vwap",
+    "commit_interval_ms": 1000
+  },
+  "log": {
+    "level": "INFO",
+    "file": "logs/vwap_strategy.log"
+  },
+  "strategy": {
+    "timezone": "Asia/Kolkata",
+    "entry_start": "09:20",
+    "entry_end": "11:30",
+    "trend_lookback": 10,
+    "pullback_window": 5,
+    "min_body_pct": 60.0,
+    "max_pullback_pct": 0.3,
+    "enable_index_bias": true,
+    "index_bias_lookback": 10,
+    "index_bias_vwap_threshold": 0.1
+  }
+}

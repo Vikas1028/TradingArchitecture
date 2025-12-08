@@ -1,0 +1,27 @@
+2025-12-08 12:00:24 | INFO | ws_feed_service | Connecting to Angel WebSocket...
+2025-12-08 12:00:24 | INFO | ws_feed_service | SmartAPI login succeeded for client_id=V314929
+2025-12-08 12:00:24 | INFO | ws_feed_service | Websocket connected; subscribing instruments
+2025-12-08 12:00:24 | INFO | ws_feed_service | Subscribed 52 tokens
+2025-12-08 12:01:24 | INFO | ws_feed_service | health: ticks=3159, tps=52.44, connected=True
+2025-12-08 12:02:24 | INFO | ws_feed_service | health: ticks=8588, tps=90.10, connected=True
+2025-12-08 12:03:25 | INFO | ws_feed_service | health: ticks=12284, tps=61.34, connected=True
+2025-12-08 12:04:25 | INFO | ws_feed_service | health: ticks=16195, tps=64.96, connected=True
+2025-12-08 12:05:25 | INFO | ws_feed_service | health: ticks=21620, tps=90.05, connected=True
+2025-12-08 12:06:25 | INFO | ws_feed_service | health: ticks=25126, tps=58.22, connected=True
+2025-12-08 12:07:25 | INFO | ws_feed_service | health: ticks=28218, tps=51.32, connected=True
+2025-12-08 12:08:26 | INFO | ws_feed_service | health: ticks=33523, tps=88.02, connected=True
+2025-12-08 12:09:26 | INFO | ws_feed_service | health: ticks=36932, tps=56.58, connected=True
+2025-12-08 12:10:26 | INFO | ws_feed_service | health: ticks=40387, tps=57.40, connected=True
+2025-12-08 12:11:26 | INFO | ws_feed_service | health: ticks=45017, tps=76.87, connected=True
+2025-12-08 12:12:27 | INFO | ws_feed_service | health: ticks=48301, tps=54.51, connected=True
+2025-12-08 12:13:27 | INFO | ws_feed_service | health: ticks=51930, tps=60.25, connected=True
+2025-12-08 12:14:27 | INFO | ws_feed_service | health: ticks=56812, tps=81.03, connected=True
+2025-12-08 12:15:27 | INFO | ws_feed_service | health: ticks=60199, tps=56.24, connected=True
+2025-12-08 12:16:28 | INFO | ws_feed_service | health: ticks=64091, tps=64.65, connected=True
+2025-12-08 12:17:28 | INFO | ws_feed_service | health: ticks=69095, tps=83.08, connected=True
+2025-12-08 12:18:28 | INFO | ws_feed_service | health: ticks=72268, tps=52.68, connected=True
+2025-12-08 12:19:28 | INFO | ws_feed_service | health: ticks=75561, tps=54.70, connected=True
+2025-12-08 12:19:39 | INFO | ws_feed_service | Received signal 15; shutting down
+2025-12-08 12:19:40 | INFO | ws_feed_service | Shutdown event set; closing websocket
+2025-12-08 12:19:42 | INFO | ws_feed_service | Shutdown requested, closing connections...
+2025-12-08 12:19:42 | INFO | ws_feed_service | Shutdown complete

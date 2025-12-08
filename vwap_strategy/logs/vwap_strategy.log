@@ -1,0 +1,8 @@
+2025-12-08T11:39:12.580+0530	INFO	vwap_strategy/main.go:24	starting vwap strategy service	{"env": "prod", "bootstrap": "localhost:9092", "group": "vwap-strategy", "stock_topic": "candles.1m", "index_topic": "indices.1m", "signal_topic": "signals.vwap", "timezone": "Asia/Kolkata"}
+2025-12-08T11:58:26.144+0530	INFO	vwap_strategy/main.go:24	starting vwap strategy service	{"env": "prod", "bootstrap": "localhost:9092", "group": "vwap-strategy", "stock_topic": "candles.1m", "index_topic": "indices.1m", "signal_topic": "signals.vwap", "timezone": "Asia/Kolkata"}
+2025-12-08T12:58:03.655+0530	INFO	runtime/asm_arm64.s:1223	received signal; shutting down	{"signal": "terminated"}
+2025-12-08T12:58:03.655+0530	INFO	runtime/asm_arm64.s:1223	received signal; shutting down	{"signal": "terminated"}
+2025-12-08T12:58:03.656+0530	INFO	vwap_strategy/main.go:24	context cancelled; exiting loop
+2025-12-08T12:58:03.656+0530	INFO	vwap_strategy/main.go:24	context cancelled; exiting loop
+2025-12-08T12:58:03.656+0530	INFO	vwap_strategy/main.go:24	shutdown complete
+2025-12-08T12:58:03.656+0530	INFO	vwap_strategy/main.go:24	shutdown complete

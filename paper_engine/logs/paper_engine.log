@@ -1,0 +1,36 @@
+2025-12-08T11:51:32.976+0530	INFO	paper_engine/main.go:24	starting paper engine	{"env": "prod", "bootstrap": "localhost:9092", "group": "paper-engine", "signals_topic": "signals.vwap", "candles_topic": "candles.1m", "trades_topic": "trades.paper", "pnl_topic": "pnl.paper", "timezone": "Asia/Kolkata"}
+2025-12-08T11:58:30.812+0530	INFO	paper_engine/main.go:24	starting paper engine	{"env": "prod", "bootstrap": "localhost:9092", "group": "paper-engine", "signals_topic": "signals.vwap", "candles_topic": "candles.1m", "trades_topic": "trades.paper", "pnl_topic": "pnl.paper", "timezone": "Asia/Kolkata"}
+2025-12-08T12:41:21.061+0530	INFO	runtime/asm_arm64.s:1223	received signal; shutting down	{"signal": "terminated"}
+2025-12-08T12:41:21.061+0530	INFO	runtime/asm_arm64.s:1223	received signal; shutting down	{"signal": "terminated"}
+2025-12-08T12:41:21.061+0530	INFO	paper_engine/main.go:24	context cancelled; exiting loop
+2025-12-08T12:41:21.061+0530	ERROR	kafka/trades_producer.go:51	failed to publish	{"error": "context canceled", "topic": "pnl.paper", "key": "PNL"}
+paper_engine/internal/kafka.(*EngineProducer).PublishPnlSnapshot
+	/Users/vikasbhandekar/Desktop/TradingArchitecture/paper_engine/internal/kafka/trades_producer.go:51
+main.run
+	/Users/vikasbhandekar/Desktop/TradingArchitecture/paper_engine/cmd/paper_engine/main.go:108
+main.main
+	/Users/vikasbhandekar/Desktop/TradingArchitecture/paper_engine/cmd/paper_engine/main.go:24
+runtime.main
+	/opt/homebrew/Cellar/go/1.24.4/libexec/src/runtime/proc.go:283
+2025-12-08T12:41:21.061+0530	WARN	paper_engine/main.go:24	failed to publish pnl snapshot	{"error": "context canceled"}
+2025-12-08T12:41:21.061+0530	INFO	paper_engine/main.go:24	context cancelled; exiting loop
+2025-12-08T12:41:21.062+0530	ERROR	kafka/trades_producer.go:51	failed to publish	{"error": "[3] Unknown Topic Or Partition: the request is for a topic or partition that does not exist on this broker", "topic": "pnl.paper", "key": "PNL"}
+paper_engine/internal/kafka.(*EngineProducer).PublishPnlSnapshot
+	/Users/vikasbhandekar/Desktop/TradingArchitecture/paper_engine/internal/kafka/trades_producer.go:51
+main.run
+	/Users/vikasbhandekar/Desktop/TradingArchitecture/paper_engine/cmd/paper_engine/main.go:140
+main.main
+	/Users/vikasbhandekar/Desktop/TradingArchitecture/paper_engine/cmd/paper_engine/main.go:24
+runtime.main
+	/opt/homebrew/Cellar/go/1.24.4/libexec/src/runtime/proc.go:283
+2025-12-08T12:41:21.062+0530	ERROR	kafka/trades_producer.go:51	failed to publish	{"error": "[3] Unknown Topic Or Partition: the request is for a topic or partition that does not exist on this broker", "topic": "pnl.paper", "key": "PNL"}
+paper_engine/internal/kafka.(*EngineProducer).PublishPnlSnapshot
+	/Users/vikasbhandekar/Desktop/TradingArchitecture/paper_engine/internal/kafka/trades_producer.go:51
+main.run
+	/Users/vikasbhandekar/Desktop/TradingArchitecture/paper_engine/cmd/paper_engine/main.go:140
+main.main
+	/Users/vikasbhandekar/Desktop/TradingArchitecture/paper_engine/cmd/paper_engine/main.go:24
+runtime.main
+	/opt/homebrew/Cellar/go/1.24.4/libexec/src/runtime/proc.go:283
+2025-12-08T12:41:21.063+0530	INFO	paper_engine/main.go:24	shutdown complete
+2025-12-08T12:41:21.063+0530	INFO	paper_engine/main.go:24	shutdown complete

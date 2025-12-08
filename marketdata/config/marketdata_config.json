@@ -1,0 +1,25 @@
+{
+  "env": "prod",
+  "kafka": {
+    "bootstrap_servers": "localhost:9092",
+    "group_id": "marketdata-candle-builder",
+    "ticks_topic": "ticks.raw",
+    "stock_candles_topic": "candles.1m",
+    "index_candles_topic": "indices.1m",
+    "commit_interval_ms": 1000
+  },
+  "symbols": {
+    "index_symbols": [
+      "NIFTY",
+      "BANKNIFTY"
+    ]
+  },
+  "log": {
+    "level": "DEBUG",
+    "file": "logs/marketdata_service.log"
+  },
+  "aggregation": {
+    "timezone": "Asia/Kolkata",
+    "flush_on_shutdown": true
+  }
+}

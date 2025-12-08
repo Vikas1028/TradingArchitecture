@@ -1,0 +1,328 @@
+You are an expert backend + DevOps engineer with strong experience in Prometheus, Grafana, and production microservices.
+
+Context:
+I have a small trading system with 4 services:
+
+1) python_feed  (Python)
+   - Connects to Angel SmartAPI WebSocket
+   - Normalizes ticks
+   - Publishes ticks to Kafka topic: ticks.raw
+
+2) marketdata   (Go)
+   - Consumes ticks.raw
+   - Builds 1-minute candles and index candles
+   - Publishes to candles.1m and indices.1m
+
+3) vwap_strategy (Go)
+   - Consumes candles.1m and indices.1m
+   - Computes VWAP-based signals
+   - Publishes to signals.vwap
+
+4) paper_engine (Go)
+   - Consumes signals.vwap and candles.1m
+   - Simulates paper trades + risk
+   - Publishes trades.paper and pnl.paper
+
+Goal:
+Add Prometheus metrics to ALL FOUR services, in a clean and consistent way, so I can:
+- Monitor health in Grafana (connections, message flow, errors).
+- Configure Grafana alerts (siren) when something is broken (WS down, no ticks, trading halted, etc.).
+
+VERY IMPORTANT:
+- Do NOT change any existing business logic.
+- Only add metrics + /metrics endpoints + minimal wiring.
+- Keep metrics simple: only gauges and counters, no labels, no high-cardinality stuff.
+- Use standard Prometheus libraries:
+  - Python: prometheus_client
+  - Go: client_golang (prometheus + promhttp)
+
+=====================================================================
+GLOBAL REQUIREMENTS FOR ALL SERVICES
+=====================================================================
+
+For EACH service, you must:
+
+1) Expose a /metrics HTTP endpoint:
+   - python_feed: on port 9000
+   - marketdata: on port 9100
+   - vwap_strategy: on port 9101
+   - paper_engine: on port 9102
+
+2) Define a small set of metrics for:
+   - Connection status (e.g., WS connected, Kafka connected).
+   - Volumes (ticks, candles, signals, trades, pnl snapshots).
+   - Errors.
+   - Critical flags (e.g., trading halted in paper_engine).
+
+3) Initialize metrics at startup and update them in the logical places inside the existing flow.
+
+4) Keep everything in proper structure:
+   - For Python: a separate metrics module/file.
+   - For Go: an internal/metrics package per service.
+
+=====================================================================
+SERVICE 1: python_feed (Python)
+=====================================================================
+
+Objective:
+Add a metrics module and wire it into python_feed so that:
+- It exposes /metrics on port 9000.
+- It tracks WS connection, Kafka connection, tick counts, reconnects, and errors.
+
+What to implement (conceptual):
+
+1) Create a new Python module, e.g.:
+   python_feed/metrics.py
+
+   In that module:
+   - Define:
+     - A gauge for WebSocket connection status:
+       "python_feed_ws_connected" (1 when connected, 0 when disconnected)
+     - A gauge for Kafka connection status:
+       "python_feed_kafka_connected"
+     - A counter for ticks received from SmartAPI WS:
+       "python_feed_ticks_received_total"
+     - A counter for ticks successfully published to Kafka:
+       "python_feed_ticks_published_total"
+     - A counter for WS reconnect attempts:
+       "python_feed_ws_reconnects_total"
+     - A counter for errors:
+       "python_feed_errors_total"
+   - Provide a function like start_metrics_server(port=9000) that:
+     - Uses prometheus_client to start the HTTP server.
+     - Exposes /metrics on that port.
+
+2) In the main entrypoint of python_feed (the file that starts the WS client and Kafka producer):
+   - Import the metrics functions and metric objects.
+   - At startup:
+     - Call start_metrics_server(9000).
+     - Set WS and Kafka gauges to 0 initially.
+
+3) Update metrics in the correct places:
+   - When WebSocket connects successfully:
+     - Set WS gauge to 1.
+   - When WebSocket disconnects / closes:
+     - Set WS gauge to 0.
+     - Increment WS reconnect counter.
+   - When Kafka producer/connection is successfully established:
+     - Set Kafka gauge to 1.
+   - When Kafka encounters a connection failure or cannot send:
+     - Set Kafka gauge to 0.
+     - Increment error counter.
+   - Every time a tick is received from WS:
+     - Increment the ticks_received counter.
+   - Every time a normalized tick is successfully published to Kafka:
+     - Increment the ticks_published counter.
+   - Any time an exception/error is logged in the main loop:
+     - Increment the errors counter.
+
+Result:
+- python_feed exposes http://localhost:9000/metrics with all metrics.
+- Metrics clearly show:
+  - WS status
+  - Kafka status
+  - Tick flow
+  - Reconnects
+  - Errors
+
+=====================================================================
+SERVICE 2: marketdata (Go)
+=====================================================================
+
+Objective:
+Add a metrics package and wire it into marketdata so that:
+- It exposes /metrics on port 9100.
+- It tracks Kafka consumer/producer state, tick consumption, candle production, and errors.
+
+What to implement conceptually:
+
+1) Create a Go package:
+   marketdata/internal/metrics
+
+   In this package:
+   - Define:
+     - A gauge for Kafka consumer connection to ticks.raw:
+       "marketdata_kafka_in_connected"
+     - A gauge for Kafka producer connection for candles:
+       "marketdata_kafka_out_connected"
+     - A counter for ticks consumed from ticks.raw:
+       "marketdata_ticks_consumed_total"
+     - A counter for candles emitted to candles.1m and indices.1m:
+       "marketdata_candles_emitted_total"
+     - A counter for errors:
+       "marketdata_errors_total"
+   - Provide a function like InitAndServeMetrics(port string) that:
+     - Registers all metrics.
+     - Starts an HTTP server on given port (e.g. "9100") exposing /metrics using promhttp.
+
+2) In the main.go of marketdata:
+   - Import the metrics package.
+   - At startup:
+     - Call InitAndServeMetrics("9100").
+     - Set KafkaInConnected and KafkaOutConnected gauges to 0 initially.
+
+3) Update metrics in the normal code flow:
+   - When Kafka consumer for ticks.raw is successfully connected/ready:
+     - Set KafkaInConnected to 1.
+   - On consumer failures / fatal disconnects:
+     - Set KafkaInConnected to 0.
+     - Increment ErrorsTotal.
+   - When Kafka producer for candle topics is successfully created/ready:
+     - Set KafkaOutConnected to 1.
+   - On producer failures:
+     - Set KafkaOutConnected to 0.
+     - Increment ErrorsTotal.
+   - Each time a tick message is consumed from ticks.raw:
+     - Increment TicksConsumedTotal.
+   - Each time a candle (for any symbol/index) is successfully emitted to Kafka:
+     - Increment CandlesEmittedTotal.
+   - On any other unexpected error paths:
+     - Increment ErrorsTotal.
+
+Result:
+- marketdata exposes http://localhost:9100/metrics
+- Metrics show consumer/producer status, message flow, and errors.
+
+=====================================================================
+SERVICE 3: vwap_strategy (Go)
+=====================================================================
+
+Objective:
+Add metrics to vwap_strategy so:
+- It exposes /metrics on port 9101.
+- It tracks candles consumed, signals emitted, errors, and a simple service-up flag.
+
+What to implement conceptually:
+
+1) Create:
+   vwap_strategy/internal/metrics
+
+   In this package:
+   - Define:
+     - A counter for candles consumed:
+       "vwap_strategy_candles_consumed_total"
+     - A counter for signals emitted to signals.vwap:
+       "vwap_strategy_signals_emitted_total"
+     - A counter for errors:
+       "vwap_strategy_errors_total"
+     - A gauge for service up:
+       "vwap_strategy_up" (1 when main is running)
+
+   - Provide InitAndServeMetrics(port string):
+     - Register metrics.
+     - Start HTTP server on that port (e.g. 9101) exposing /metrics.
+
+2) In vwap_strategy main.go:
+   - Import metrics package.
+   - At startup:
+     - Call InitAndServeMetrics("9101").
+     - Set ServiceUp gauge to 1.
+
+3) Update metrics in logic:
+   - Each time a candle (stock or index) is consumed:
+     - Increment CandlesConsumedTotal.
+   - Each time a strategy signal is successfully published to signals.vwap:
+     - Increment SignalsEmittedTotal.
+   - On any error in processing/publishing:
+     - Increment ErrorsTotal.
+
+Result:
+- vwap_strategy exposes http://localhost:9101/metrics with useful counters.
+
+=====================================================================
+SERVICE 4: paper_engine (Go)
+=====================================================================
+
+Objective:
+Add metrics to paper_engine so:
+- It exposes /metrics on port 9102.
+- It tracks signals consumed, trades emitted, pnl snapshots, a trading_halted flag, and errors.
+
+What to implement conceptually:
+
+1) Create:
+   paper_engine/internal/metrics
+
+   In this package:
+   - Define:
+     - A counter for strategy signals consumed from signals.vwap:
+       "paper_engine_signals_consumed_total"
+     - A counter for trades emitted to trades.paper:
+       "paper_engine_trades_emitted_total"
+     - A counter for PnL snapshots emitted to pnl.paper:
+       "paper_engine_pnl_snapshots_total"
+     - A gauge for trading halted flag:
+       "paper_engine_trading_halted" (1 when daily loss limit hit and trading is halted, else 0)
+     - A counter for errors:
+       "paper_engine_errors_total"
+
+   - Provide InitAndServeMetrics(port string):
+     - Register metrics.
+     - Start HTTP /metrics server on that port (e.g. 9102).
+
+2) In paper_engine main.go:
+   - Import metrics.
+   - At startup:
+     - Call InitAndServeMetrics("9102").
+     - Set TradingHalted gauge to 0 initially.
+
+3) Update metrics in the engine logic:
+   - Each time a signal is consumed from signals.vwap:
+     - Increment SignalsConsumedTotal.
+   - Each time a trade event (ENTRY or EXIT) is emitted to trades.paper:
+     - Increment TradesEmittedTotal.
+   - Each time a PnL snapshot is emitted to pnl.paper:
+     - Increment PnlSnapshotsTotal.
+   - When the risk engine decides that the daily max loss is hit and trading is halted:
+     - Set TradingHalted to 1.
+   - When a new trading day begins and risk/trading state is reset:
+     - Set TradingHalted back to 0.
+   - On any unexpected error during signal handling, candle processing, trade generation, or PnL snapshot creation:
+     - Increment ErrorsTotal.
+
+Result:
+- paper_engine exposes http://localhost:9102/metrics
+- Grafana can alert when trading is halted or errors spike.
+
+=====================================================================
+PROMETHEUS SCRAPE CONFIG (FOR MY REFERENCE ONLY)
+=====================================================================
+
+I will use Prometheus with scrape configs similar to:
+
+- job: python_feed → target localhost:9000
+- job: marketdata → target localhost:9100
+- job: vwap_strategy → target localhost:9101
+- job: paper_engine → target localhost:9102
+
+You do not need to configure Prometheus here; just make sure each app exposes /metrics.
+
+=====================================================================
+WHAT YOU MUST RETURN
+=====================================================================
+
+You must output:
+
+1) For python_feed:
+   - The new metrics module (metrics.py) with definitions and start function.
+   - The modifications needed in the main entrypoint (where to import metrics, where to start server, and where to update metrics).
+
+2) For marketdata (Go):
+   - The internal/metrics package with all metrics and InitAndServeMetrics.
+   - The main.go changes (initialization and example places where metrics are updated).
+
+3) For vwap_strategy (Go):
+   - The internal/metrics package and InitAndServeMetrics.
+   - The main.go changes and clear examples of where to increment counters.
+
+4) For paper_engine (Go):
+   - The internal/metrics package and InitAndServeMetrics.
+   - The main.go changes and example points in the existing code where the metrics should be updated (signal consumption, trade emission, pnl snapshot emission, risk halt flag, errors).
+
+VERY IMPORTANT:
+- Focus on clear, well-structured, production-quality code.
+- Add brief comments above each metric to explain its purpose.
+- Keep things consistent across all three Go services.
+- Do NOT invent new business logic; only wire metrics into the existing flow.
+
+End of spec.

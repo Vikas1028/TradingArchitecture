@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.python_feed.service</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/bin/python3</string>
+        <string>-m</string>
+        <string>python_feed.main.main</string>
+        <string>--config</string>
+        <string>/usr/local/python_feed/config/ws_feed_config.json</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>/usr/local/python_feed</string>
+
+    <key>StandardOutPath</key>
+    <string>/usr/local/python_feed/logs/ws_feed_service.log</string>
+    <key>StandardErrorPath</key>
+    <string>/usr/local/python_feed/logs/ws_feed_service.log</string>
+
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+        <key>PYTHONPATH</key>
+        <string>/usr/local:/usr/local/python_feed</string>
+    </dict>
+</dict>
+</plist>

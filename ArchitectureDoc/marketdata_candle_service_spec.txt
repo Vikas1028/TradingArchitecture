@@ -1,0 +1,546 @@
+You are an expert Go backend and trading-systems developer.
+
+I want you to build a robust, production-grade **Market Data Service in Go** that:
+
+- Consumes normalized tick data from Kafka topic `"ticks.raw"`.
+- Aggregates ticks into **1-minute OHLCV candles** per symbol.
+- Maintains a **session VWAP** per symbol, resetting on **trading-day change** (calendar day in the configured timezone, always reset).
+- Publishes 1-minute candles (with VWAP) to:
+  - `"candles.1m"` for regular stock symbols
+  - `"indices.1m"` for index symbols (e.g., `"NIFTY"`, `"BANKNIFTY"`).
+- Uses a JSON config file for Kafka settings, logging, symbol classification, and timezone.
+- Normalizes **symbol case to UPPERCASE only** and converts all timestamps to the configured timezone before truncation (no suffix/prefix trimming).
+- Uses **manual Kafka offset commits** based on a configured interval.
+- Is structured into clear internal packages: `config`, `kafka`, `candle`, `logging`.
+
+For EVERY exported function and key method, add a **short comment ABOVE it** explaining:
+- What it does
+- Its inputs and outputs
+- How it fits into the overall data flow
+
+This service must NOT contain:
+- Any strategy logic (no BUY/SELL).
+- Any order or broker API calls.
+- Any PnL or risk logic.
+- Any HTTP server or UI.
+
+It is strictly:
+**Kafka "ticks.raw" → Go Market Data Service → Kafka "candles.1m" & "indices.1m"**
+
+=====================================================================
+0. PROJECT STRUCTURE
+=====================================================================
+
+Create a Go module with this layout:
+
+marketdata/
+  go.mod
+  go.sum
+
+  cmd/
+    marketdata/
+      main.go              // entrypoint: wiring, loop, shutdown
+
+  config/
+    marketdata_config.json // service config
+
+  internal/
+    config/
+      config.go            // config structs + LoadConfig
+    logging/
+      logging.go           // logger setup (zap/log/zerolog)
+    kafka/
+      consumer.go          // TickConsumer
+      producer.go          // CandleProducer
+    candle/
+      state.go             // SymbolState struct
+      builder.go           // CandleBuilder (OnTick, FlushAll)
+
+You can add more internal packages later, but keep these responsibilities clean.
+
+=====================================================================
+1. INPUT TICK SCHEMA (KAFKA "ticks.raw")
+=====================================================================
+
+The Python WS utility publishes normalized ticks as JSON:
+
+{
+  "symbol": "RELIANCE",
+  "exchange": "NSE",
+  "time": "2025-12-07T09:21:32.123+05:30",
+  "ltp": 2710.25,
+  "volume": 200,
+  "bid": 2709.9,
+  "ask": 2710.4
+}
+
+In Go, define:
+
+// Tick represents a single normalized market tick consumed from Kafka "ticks.raw".
+type Tick struct {
+    Symbol   string    `json:"symbol"`
+    Exchange string    `json:"exchange"`
+    Time     time.Time `json:"time"`    // parsed from RFC3339 / ISO8601
+    LTP      float64   `json:"ltp"`
+    Volume   int64     `json:"volume"`
+    Bid      float64   `json:"bid"`
+    Ask      float64   `json:"ask"`
+}
+
+Behavior:
+- Parse `"time"` using `time.Parse(time.RFC3339Nano, rawTimeString)`.
+- If parsing fails:
+  - Log a warning.
+  - Skip that tick (don’t crash the service).
+
+=====================================================================
+2. OUTPUT CANDLE SCHEMA ("candles.1m" & "indices.1m")
+=====================================================================
+
+For each symbol and minute, publish a candle with session VWAP:
+
+Example (stock candle):
+
+{
+  "symbol": "RELIANCE",
+  "time": "2025-12-07T09:21:00+05:30",
+  "open": 2708.5,
+  "high": 2711.0,
+  "low": 2707.8,
+  "close": 2710.25,
+  "volume": 50000,
+  "vwap": 2709.75
+}
+
+Same schema goes to `"indices.1m"` for `"NIFTY"` and `"BANKNIFTY"`.
+
+Define:
+
+// Candle represents a 1-minute OHLCV bar with session VWAP.
+type Candle struct {
+    Symbol string    `json:"symbol"`
+    Time   time.Time `json:"time"`   // minute start time (truncated to minute, in configured timezone)
+    Open   float64   `json:"open"`
+    High   float64   `json:"high"`
+    Low    float64   `json:"low"`
+    Close  float64   `json:"close"`
+    Volume int64     `json:"volume"`
+    VWAP   float64   `json:"vwap"`
+}
+
+Note:
+- This service can emit **partial candles on shutdown** if `flush_on_shutdown` is true.  
+  Consumers must assume the **latest candle may be incomplete**.
+
+=====================================================================
+3. CONFIG FILE (marketdata/config/marketdata_config.json)
+=====================================================================
+
+Create JSON config like:
+
+{
+  "env": "prod",
+
+  "kafka": {
+    "bootstrap_servers": "localhost:9092",
+    "group_id": "marketdata-candle-builder",
+    "ticks_topic": "ticks.raw",
+    "stock_candles_topic": "candles.1m",
+    "index_candles_topic": "indices.1m",
+    "commit_interval_ms": 1000
+  },
+
+  "symbols": {
+    "index_symbols": [
+      "NIFTY",
+      "BANKNIFTY"
+    ]
+  },
+
+  "log": {
+    "level": "INFO",
+    "file": "logs/marketdata_service.log"
+  },
+
+  "aggregation": {
+    "timezone": "Asia/Kolkata",
+    "flush_on_shutdown": true
+  }
+}
+
+**Prerequisite:** Kafka topics `"ticks.raw"`, `"candles.1m"`, and `"indices.1m"` must already exist, or Kafka auto-creation must be enabled. This service will NOT create topics.
+If they do not exist, create them at startup using the configured Kafka cluster (assume local/installed Kafka is reachable).
+
+=====================================================================
+3.1 Config structs (internal/config/config.go)
+=====================================================================
+
+// KafkaConfig holds Kafka-related settings for the service.
+type KafkaConfig struct {
+    BootstrapServers  string `json:"bootstrap_servers"`
+    GroupID           string `json:"group_id"`
+    TicksTopic        string `json:"ticks_topic"`
+    StockCandlesTopic string `json:"stock_candles_topic"`
+    IndexCandlesTopic string `json:"index_candles_topic"`
+    CommitIntervalMs  int    `json:"commit_interval_ms"`
+}
+
+// SymbolsConfig describes classification of symbols (which ones are indices).
+type SymbolsConfig struct {
+    IndexSymbols []string `json:"index_symbols"`
+}
+
+// LogConfig contains logging configuration.
+type LogConfig struct {
+    Level string `json:"level"`
+    File  string `json:"file"`
+}
+
+// AggregationConfig controls time zone and flush behavior.
+type AggregationConfig struct {
+    Timezone        string `json:"timezone"`
+    FlushOnShutdown bool   `json:"flush_on_shutdown"`
+}
+
+// AppConfig is the root configuration struct for the market data service.
+type AppConfig struct {
+    Env         string            `json:"env"`
+    Kafka       KafkaConfig       `json:"kafka"`
+    Symbols     SymbolsConfig     `json:"symbols"`
+    Log         LogConfig         `json:"log"`
+    Aggregation AggregationConfig `json:"aggregation"`
+}
+
+// LoadConfig loads and validates the market data service configuration from the given JSON file path.
+// It applies default values for missing optional fields and ensures required fields are set.
+// It returns an AppConfig or an error if the config is invalid.
+func LoadConfig(path string) (*AppConfig, error) {
+    // 1. Read file.
+    // 2. json.Unmarshal.
+    // 3. Apply defaults:
+    //    - if TicksTopic empty → "ticks.raw"
+    //    - if StockCandlesTopic empty → "candles.1m"
+    //    - if IndexCandlesTopic empty → "indices.1m"
+    //    - if CommitIntervalMs == 0 → 1000
+    //    - if Aggregation.Timezone empty → "Asia/Kolkata"
+    // 4. Validate required fields: BootstrapServers, GroupID, Log.File.
+    // 5. Ensure logs directory exists from Log.File path.
+    // 6. Return config or error.
+}
+
+=====================================================================
+4. LOGGER (internal/logging/logging.go)
+=====================================================================
+
+// NewLogger initializes and returns a structured logger for the market data service.
+// It configures the log level and output file based on the provided LogConfig.
+func NewLogger(cfg LogConfig) (*zap.Logger, error) {
+    // Use zap or standard log package.
+    // Configure log level (INFO, DEBUG, etc).
+    // Log to cfg.File and optionally stderr.
+    // Use human-readable timestamped format.
+}
+
+You can implement using zap or standard log; keep the signature.
+
+=====================================================================
+5. KAFKA CONSUMER (internal/kafka/consumer.go)
+=====================================================================
+
+// TickConsumer wraps a Kafka consumer that reads Tick messages from the "ticks.raw" topic.
+type TickConsumer struct {
+    // underlying Kafka consumer (e.g., confluent-kafka-go or segmentio/kafka-go)
+    // logger
+}
+
+// NewTickConsumer constructs a Kafka consumer subscribed to cfg.TicksTopic using cfg.GroupID.
+// It returns a TickConsumer that can Poll for new Tick messages.
+func NewTickConsumer(cfg KafkaConfig, logger *zap.Logger) (*TickConsumer, error) {
+    // 1. Create consumer with cfg.BootstrapServers and cfg.GroupID.
+    // 2. Subscribe to cfg.TicksTopic.
+}
+
+// Poll reads the next Tick message from Kafka or returns nil if there is no message yet.
+// It should respect context cancellation and return an error on fatal consumer errors.
+func (c *TickConsumer) Poll(ctx context.Context) (*Tick, error) {
+    // 1. Poll/Fetch message.
+    // 2. On message:
+    //    - Deserialize JSON into Tick.
+    //    - Parse "time" into time.Time.
+    //    - Convert Tick.Symbol to uppercase for internal processing.
+    //    - Return &tick.
+    // 3. On timeout: return (nil, nil).
+    // 4. On error: log and return error.
+}
+
+// Commit commits the current consumer offsets if manual committing is used.
+func (c *TickConsumer) Commit() error {
+    // Implementation based on Kafka library.
+}
+
+=====================================================================
+6. KAFKA PRODUCER (internal/kafka/producer.go)
+=====================================================================
+
+// CandleProducer wraps a Kafka producer responsible for sending Candle messages
+// to the stock and index candle topics.
+type CandleProducer struct {
+    // underlying Kafka producer
+    stockTopic  string
+    indexTopic  string
+    logger      *zap.Logger
+}
+
+// NewCandleProducer creates a new Kafka producer for stock and index candle topics.
+func NewCandleProducer(cfg KafkaConfig, logger *zap.Logger) (*CandleProducer, error) {
+    // Initialize producer with cfg.BootstrapServers.
+    // Store cfg.StockCandlesTopic and cfg.IndexCandlesTopic.
+}
+
+// PublishStockCandle serializes the given Candle and publishes it to the stock candle topic.
+// The symbol is used as the Kafka message key.
+func (p *CandleProducer) PublishStockCandle(ctx context.Context, c Candle) error {
+    // Serialize to JSON.
+    // Produce to p.stockTopic with key = c.Symbol.
+}
+
+// PublishIndexCandle serializes the given Candle and publishes it to the index candle topic.
+func (p *CandleProducer) PublishIndexCandle(ctx context.Context, c Candle) error {
+    // Serialize to JSON.
+    // Produce to p.indexTopic with key = c.Symbol.
+}
+
+// Flush flushes any pending messages in the Kafka producer before shutdown.
+func (p *CandleProducer) Flush(timeout time.Duration) error {
+    // Call underlying producer Flush/Close.
+}
+
+=====================================================================
+7. CANDLE STATE & BUILDER (internal/candle/state.go & builder.go)
+=====================================================================
+
+7.1 SymbolState (internal/candle/state.go)
+
+// SymbolState holds the rolling aggregation state for a single symbol and 1-minute candles,
+// as well as cumulative values for per-session VWAP calculation.
+type SymbolState struct {
+    Symbol      string
+    MinuteStart time.Time // minute boundary in the configured timezone
+
+    Open   float64
+    High   float64
+    Low    float64
+    Close  float64
+    Volume int64
+
+    CumPV  float64 // cumulative Price * Volume for session VWAP
+    CumVol int64   // cumulative Volume for session VWAP
+
+    Initialized bool
+}
+
+7.2 CandleBuilder (internal/candle/builder.go)
+
+// CandleBuilder aggregates Tick events into 1-minute Candle bars and maintains per-session VWAP.
+// It resets per-symbol session state when a new calendar trading day is detected.
+type CandleBuilder struct {
+    states map[string]*SymbolState
+    tz     *time.Location
+    logger *zap.Logger
+}
+
+// NewCandleBuilder constructs a CandleBuilder for the given IANA timezone name (e.g. "Asia/Kolkata").
+// It loads the timezone and initializes the internal symbol state map.
+func NewCandleBuilder(tzName string, logger *zap.Logger) (*CandleBuilder, error) {
+    // time.LoadLocation(tzName)
+    // initialize states map
+}
+
+// OnTick processes a single Tick, updates the symbol's aggregation state,
+// and returns any Candle objects that have just closed because the minute rolled over.
+// It also enforces per-session VWAP by resetting state when the trading day changes.
+func (b *CandleBuilder) OnTick(t Tick) []Candle {
+    // 1. Normalize symbol: symbol := strings.ToUpper(t.Symbol)
+    // 2. Convert time to builder timezone: tickTime := t.Time.In(b.tz)
+    // 3. minuteStart := tickTime.Truncate(time.Minute)
+    // 4. Look up state := b.states[symbol]; if nil, create new SymbolState with Symbol = symbol.
+    //
+    // 5. If state.Initialized:
+    //      - Check if the calendar day changed:
+    //          y1, m1, d1 := state.MinuteStart.Date()
+    //          y2, m2, d2 := minuteStart.Date()
+    //        If different day:
+    //          - Reset full state for new session:
+    //              state.MinuteStart = minuteStart
+    //              state.Open = t.LTP
+    //              state.High = t.LTP
+    //              state.Low = t.LTP
+    //              state.Close = t.LTP
+    //              state.Volume = t.Volume
+    //              state.CumPV = t.LTP * float64(t.Volume)
+    //              state.CumVol = t.Volume
+    //              state.Initialized = true
+    //              return nil (no closed candle; new session started)
+    //
+    // 6. If !state.Initialized:
+    //      - Initialize first candle in this session:
+    //          state.MinuteStart = minuteStart
+    //          state.Open = t.LTP
+    //          state.High = t.LTP
+    //          state.Low = t.LTP
+    //          state.Close = t.LTP
+    //          state.Volume = t.Volume
+    //          state.CumPV = t.LTP * float64(t.Volume)
+    //          state.CumVol = t.Volume
+    //          state.Initialized = true
+    //          return nil
+    //
+    // 7. Else if minuteStart == state.MinuteStart (same minute):
+    //      - Update OHLCV and VWAP accumulators:
+    //          state.High = max(state.High, t.LTP)
+    //          state.Low  = min(state.Low, t.LTP)
+    //          state.Close = t.LTP
+    //          state.Volume += t.Volume
+    //          state.CumPV += t.LTP * float64(t.Volume)
+    //          state.CumVol += t.Volume
+    //          return nil
+    //
+    // 8. Else (minute changed, same session):
+    //      - Finalize previous candle:
+    //          vwap := 0.0
+    //          if state.CumVol > 0 {
+    //              vwap = state.CumPV / float64(state.CumVol)
+    //          }
+    //          candle := Candle{
+    //             Symbol: state.Symbol,
+    //             Time:   state.MinuteStart,
+    //             Open:   state.Open,
+    //             High:   state.High,
+    //             Low:    state.Low,
+    //             Close:  state.Close,
+    //             Volume: state.Volume,
+    //             VWAP:   vwap,
+    //          }
+    //      - Move to new minute:
+    //          state.MinuteStart = minuteStart
+    //          state.Open = t.LTP
+    //          state.High = t.LTP
+    //          state.Low = t.LTP
+    //          state.Close = t.LTP
+    //          state.Volume = t.Volume
+    //          // CumPV and CumVol are NOT reset here: they continue session VWAP.
+    //          state.CumPV += t.LTP * float64(t.Volume)
+    //          state.CumVol += t.Volume
+    //      - Return []Candle{candle}
+}
+
+// FlushAll finalizes and returns candles for all currently initialized symbol states.
+// It is used during graceful shutdown to emit the last partial candles if desired.
+func (b *CandleBuilder) FlushAll() []Candle {
+    // For each state in b.states:
+    //   if state.Initialized:
+    //      vwap := 0
+    //      if state.CumVol > 0 {
+    //          vwap = state.CumPV / float64(state.CumVol)
+    //      }
+    //      c := Candle{... from state ...}
+    //      append c to slice
+    // Return slice
+}
+
+Notes:
+- VWAP is **per-session (per trading day)**: state is reset when the date changes.
+- If process restarts midday, VWAP starts from process start, which is acceptable for v1.
+
+=====================================================================
+8. MAIN SERVICE LOGIC (cmd/marketdata/main.go)
+=====================================================================
+
+// main is the entrypoint for the market data candle + VWAP builder service.
+// It wires up configuration, logging, Kafka consumer/producer, and the CandleBuilder,
+// then enters the main processing loop until a shutdown signal is received.
+func main() {
+    // 1. Load config from "marketdata/config/marketdata_config.json".
+    // 2. Initialize logger via internal/logging.NewLogger.
+    // 3. Create TickConsumer and CandleProducer using cfg.Kafka.
+    // 4. Create CandleBuilder using cfg.Aggregation.Timezone.
+    // 5. Build an index symbol set (map[string]bool) from cfg.Symbols.IndexSymbols, normalized to UPPERCASE.
+    // 6. Create context with cancel, and set up signal handling for SIGINT/SIGTERM to call cancel().
+    // 7. Start a commit ticker using cfg.Kafka.CommitIntervalMs for manual offset commits.
+    // 8. Enter main loop:
+    //      - select over:
+    //          a) ctx.Done(): break loop for shutdown.
+    //          b) commitTicker.C: consumer.Commit()
+    //          c) default: Poll() for next tick.
+    //      - For each non-nil Tick:
+    //           closed := builder.OnTick(*tick)
+    //           for each candle in closed:
+    //               if indexSet[candle.Symbol] == true:
+    //                   producer.PublishIndexCandle(ctx, candle)
+    //               else:
+    //                   producer.PublishStockCandle(ctx, candle)
+    // 9. On ctx.Done(), exit loop.
+    // 10. If cfg.Aggregation.FlushOnShutdown:
+    //       - candles := builder.FlushAll()
+    //       - Publish each candle to proper topic (stock vs index).
+    // 11. producer.Flush() for some timeout.
+    // 12. Close consumer and log "shutdown complete".
+}
+
+Example of index symbol set:
+
+indexSet := make(map[string]bool)
+for _, s := range cfg.Symbols.IndexSymbols {
+    indexSet[strings.ToUpper(s)] = true
+}
+
+Then:
+
+if indexSet[strings.ToUpper(candle.Symbol)] {
+    producer.PublishIndexCandle(ctx, candle)
+} else {
+    producer.PublishStockCandle(ctx, candle)
+}
+
+=====================================================================
+9. ERROR HANDLING RULES
+=====================================================================
+
+- Tick JSON parse error:
+  - Log warning with enough context.
+  - Skip and continue.
+
+- Time parse error:
+  - Log warning.
+  - Skip that tick.
+
+- Kafka producer send error:
+  - Log error, try to continue.
+  - If fatal connection error → you may exit main and let supervisor restart.
+
+- Kafka consumer fatal error:
+  - Log error, exit main.
+
+- On panic:
+  - Prefer to recover in main, log stack trace, then exit.
+
+=====================================================================
+10. STYLE & COMMENTS
+=====================================================================
+
+- Use Go modules, Go 1.20+.
+- Use clear, small functions; no giant god functions.
+- For EVERY exported function and key method:
+  - Add a short comment block describing what it does, inputs, outputs, and role in the pipeline.
+
+Example:
+
+// OnTick processes a single Tick, updates the symbol's rolling candle state,
+// and returns any Candle that has just closed because the minute boundary rolled over.
+func (b *CandleBuilder) OnTick(t Tick) []Candle { ... }
+
+Keep **all strategy, risk, and broker logic out** of this service.
+
+=====================================================================
+END OF SPEC
+=====================================================================

@@ -1,0 +1,677 @@
+You are an expert Go backend and trading-systems developer.
+
+I want you to build a robust, production-style **Paper Trading + Risk Engine in Go** that:
+
+- Consumes **strategy signals** from Kafka topic `"signals.vwap"`.
+- Consumes **1-minute stock candles** from Kafka topic `"candles.1m"`.
+- Simulates **intraday trades (LONG only for v1)** based on those signals.
+- Enforces **simple risk rules**: per-trade SL/target, max daily loss, max trades, max open positions.
+- Maintains **positions & daily PnL** in memory.
+- Emits **trades** and **PnL snapshots** to Kafka for monitoring:
+  - `"trades.paper"`
+  - `"pnl.paper"`
+- Uses a JSON config file for all parameters (Kafka, risk, trading window, timezone).
+- Is structured in clean internal packages: `config`, `logging`, `kafka`, `engine`.
+- Includes a short comment ABOVE every exported function/method explaining:
+  - What it does
+  - Inputs/outputs
+  - How it fits into the flow
+
+IMPORTANT:
+- This service MUST NOT talk to any real broker.
+- It MUST NOT place live orders.
+- It MUST NOT do any strategy logic (no signal generation). Signals come from `"signals.vwap"`.
+
+It is strictly:
+
+**Kafka candles + signals → Paper Engine (positions + PnL + risk) → Kafka trades.pnl (paper)**
+
+=====================================================================
+0. PROJECT STRUCTURE
+=====================================================================
+
+Create a Go module with this layout:
+
+paper_engine/
+  go.mod
+  go.sum
+
+  cmd/
+    paper_engine/
+      main.go                // entrypoint: wiring, loop, shutdown
+
+  config/
+    paper_engine_config.json
+
+  internal/
+    config/
+      config.go              // LoadConfig + typed config structs
+    logging/
+      logging.go             // logger
+    kafka/
+      signals_consumer.go    // reads StrategySignal from signals.vwap
+      candles_consumer.go    // reads Candle from candles.1m
+      trades_producer.go     // publishes Trade events and PnL snapshots
+    engine/
+      types.go               // Candle, StrategySignal, Position, Trade, PnlSnapshot
+      state.go               // in-memory positions + daily state
+      processor.go           // core logic: OnSignal, OnCandle, risk checks
+
+=====================================================================
+1. INPUT SCHEMAS
+=====================================================================
+
+1.1 Strategy signals (Kafka: "signals.vwap")
+-------------------------------------------
+
+Signals come from the VWAP strategy service, in JSON like:
+
+{
+  "strategy": "VWAP_PULLBACK_V1",
+  "symbol": "RELIANCE",
+  "side": "BUY",
+  "time": "2025-12-07T10:05:00+05:30",
+  "reason": "INDEX_BIAS_LONG_PULLBACK_CONFIRMED"
+}
+
+In Go (internal/engine/types.go):
+
+// SignalSide describes the direction of a signal.
+type SignalSide string
+
+const (
+    SideBuy  SignalSide = "BUY"
+    SideSell SignalSide = "SELL" // keep for future; v1 is long-only (BUY)
+)
+
+// StrategySignal represents an incoming trading signal from a strategy service.
+type StrategySignal struct {
+    Strategy string      `json:"strategy"`
+    Symbol   string      `json:"symbol"`
+    Side     SignalSide  `json:"side"`
+    Time     time.Time   `json:"time"`
+    Reason   string      `json:"reason"`
+}
+
+Assume:
+- Signals are generated at/just after candle close.
+- Signal.Time matches or is very close to the corresponding candle.Time.
+
+1.2 1-minute stock candles (Kafka: "candles.1m")
+------------------------------------------------
+
+Same schema as your marketdata service:
+
+{
+  "symbol": "RELIANCE",
+  "time": "2025-12-07T10:05:00+05:30",
+  "open": 2710.0,
+  "high": 2718.0,
+  "low": 2708.0,
+  "close": 2717.0,
+  "volume": 50000,
+  "vwap": 2712.0
+}
+
+// Candle represents a 1-minute OHLCV bar used for paper execution and MTM.
+type Candle struct {
+    Symbol string    `json:"symbol"`
+    Time   time.Time `json:"time"`
+    Open   float64   `json:"open"`
+    High   float64   `json:"high"`
+    Low    float64   `json:"low"`
+    Close  float64   `json:"close"`
+    Volume int64     `json:"volume"`
+    VWAP   float64   `json:"vwap"`
+}
+
+Normalization:
+- Always convert `Symbol` to upper-case for internal use: `strings.ToUpper`.
+
+=====================================================================
+2. OUTPUT SCHEMAS
+=====================================================================
+
+2.1 Trades (Kafka: "trades.paper")
+----------------------------------
+
+// TradeType classifies whether the trade is an entry or exit.
+type TradeType string
+
+const (
+    TradeEntry TradeType = "ENTRY"
+    TradeExit  TradeType = "EXIT"
+)
+
+// TradeEvent represents a simulated trade execution (paper).
+type TradeEvent struct {
+    Symbol      string    `json:"symbol"`
+    Time        time.Time `json:"time"`        // execution time
+    Price       float64   `json:"price"`       // executed price
+    Quantity    int64     `json:"quantity"`    // positive for long
+    TradeType   TradeType `json:"trade_type"`  // ENTRY or EXIT
+    Side        string    `json:"side"`        // "LONG" (v1); future: SHORT
+    Strategy    string    `json:"strategy"`    // from signal
+    SignalTime  time.Time `json:"signal_time"` // when signal was generated
+    Reason      string    `json:"reason"`      // e.g. "ENTRY_FROM_SIGNAL", "EXIT_SL_HIT", "EXIT_TARGET_HIT", "EXIT_EOD"
+    RealizedPnl float64   `json:"realized_pnl"`// non-zero on exit trades
+}
+
+2.2 PnL snapshots (Kafka: "pnl.paper")
+--------------------------------------
+
+// PnlSnapshot represents a periodic snapshot of daily PnL and risk state.
+type PnlSnapshot struct {
+    Time              time.Time `json:"time"`
+    RealizedPnl       float64   `json:"realized_pnl"`
+    UnrealizedPnl     float64   `json:"unrealized_pnl"`
+    OpenPositions     int       `json:"open_positions"`
+    TradesToday       int       `json:"trades_today"`
+    MaxDrawdown       float64   `json:"max_drawdown"`
+    MaxDailyLossLimit float64   `json:"max_daily_loss_limit"`
+    TradingHalted     bool      `json:"trading_halted"` // true if daily loss limit hit
+}
+
+=====================================================================
+3. CONFIG FILE (config/paper_engine_config.json)
+=====================================================================
+
+Example:
+
+{
+  "env": "prod",
+
+  "kafka": {
+    "bootstrap_servers": "localhost:9092",
+    "group_id": "paper-engine",
+    "signals_topic": "signals.vwap",
+    "candles_topic": "candles.1m",
+    "trades_topic": "trades.paper",
+    "pnl_topic": "pnl.paper",
+    "commit_interval_ms": 1000
+  },
+
+  "log": {
+    "level": "INFO",
+    "file": "logs/paper_engine.log"
+  },
+
+  "trading": {
+    "timezone": "Asia/Kolkata",
+    "entry_start": "09:20",    // HH:MM local (ignore signals before this)
+    "entry_end":   "15:15",    // HH:MM local (ignore new entries after this)
+    "eod_flat_time": "15:20",  // HH:MM local (square-off remaining positions at candle close >= this time)
+    "mtm_snapshot_interval_sec": 60
+  },
+
+  "risk": {
+    "capital_per_trade": 10000.0,
+    "max_trades_per_day": 10,
+    "max_open_positions": 3,
+    "max_daily_loss": 2000.0,
+    "per_trade_sl_pct": 0.5,
+    "per_trade_target_pct": 1.0
+  }
+}
+
+=====================================================================
+3.1 Config structs (internal/config/config.go)
+=====================================================================
+
+// KafkaConfig holds Kafka-related settings for the paper engine.
+type KafkaConfig struct {
+    BootstrapServers string `json:"bootstrap_servers"`
+    GroupID          string `json:"group_id"`
+
+    SignalsTopic string `json:"signals_topic"`
+    CandlesTopic string `json:"candles_topic"`
+    TradesTopic  string `json:"trades_topic"`
+    PnlTopic     string `json:"pnl_topic"`
+
+    CommitIntervalMs int `json:"commit_interval_ms"`
+}
+
+// LogConfig contains logging configuration.
+type LogConfig struct {
+    Level string `json:"level"`
+    File  string `json:"file"`
+}
+
+// TradingConfig defines general intraday trading settings for the paper engine.
+type TradingConfig struct {
+    Timezone              string `json:"timezone"`
+    EntryStart            string `json:"entry_start"`
+    EntryEnd              string `json:"entry_end"`
+    EODFlatTime           string `json:"eod_flat_time"`
+    MtmSnapshotIntervalSec int   `json:"mtm_snapshot_interval_sec"`
+}
+
+// RiskConfig defines risk management parameters for the paper engine.
+type RiskConfig struct {
+    CapitalPerTrade   float64 `json:"capital_per_trade"`
+    MaxTradesPerDay   int     `json:"max_trades_per_day"`
+    MaxOpenPositions  int     `json:"max_open_positions"`
+    MaxDailyLoss      float64 `json:"max_daily_loss"`
+    PerTradeSLPct     float64 `json:"per_trade_sl_pct"`
+    PerTradeTargetPct float64 `json:"per_trade_target_pct"`
+}
+
+// AppConfig is the root configuration for the paper trading engine.
+type AppConfig struct {
+    Env     string         `json:"env"`
+    Kafka   KafkaConfig    `json:"kafka"`
+    Log     LogConfig      `json:"log"`
+    Trading TradingConfig  `json:"trading"`
+    Risk    RiskConfig     `json:"risk"`
+}
+
+// LoadConfig loads and validates the paper engine configuration from the given JSON path.
+// It applies sensible defaults for optional fields and ensures required fields are present.
+func LoadConfig(path string) (*AppConfig, error) {
+    // 1. Read file.
+    // 2. json.Unmarshal into AppConfig.
+    // 3. Apply defaults:
+    //    - If SignalsTopic empty -> "signals.vwap"
+    //    - If CandlesTopic empty -> "candles.1m"
+    //    - If TradesTopic empty -> "trades.paper"
+    //    - If PnlTopic empty -> "pnl.paper"
+    //    - If CommitIntervalMs == 0 -> 1000
+    //    - If Trading.Timezone empty -> "Asia/Kolkata"
+    //    - If Trading.MtmSnapshotIntervalSec == 0 -> 60
+    // 4. Validate required fields:
+    //    - Kafka.BootstrapServers, Kafka.GroupID, Log.File
+    //    - Trading.EntryStart, Trading.EntryEnd, Trading.EODFlatTime not empty
+    //    - Risk.CapitalPerTrade > 0, Risk.MaxTradesPerDay > 0, etc.
+    // 5. Ensure Log.File directory exists.
+    // 6. Return *AppConfig or error.
+}
+
+=====================================================================
+4. LOGGER (internal/logging/logging.go)
+=====================================================================
+
+// NewLogger initializes and returns a logger for the paper engine.
+// It configures log level and output file based on the provided LogConfig.
+func NewLogger(cfg LogConfig) (*zap.Logger, error) {
+    // Use zap or standard log.
+    // Log to cfg.File and stderr
+}
+
+=====================================================================
+5. KAFKA LAYER
+=====================================================================
+
+We have:
+- One consumer for **signals** (`signals.vwap`)
+- One consumer for **candles** (`candles.1m`)
+- One producer for **trades** and **pnl**.
+
+5.1 Signals consumer (internal/kafka/signals_consumer.go)
+
+// SignalsConsumer wraps a Kafka consumer that reads StrategySignal messages.
+type SignalsConsumer struct {
+    // underlying Kafka consumer
+    logger *zap.Logger
+}
+
+// NewSignalsConsumer creates a Kafka consumer subscribed to cfg.SignalsTopic.
+func NewSignalsConsumer(cfg KafkaConfig, logger *zap.Logger) (*SignalsConsumer, error) {
+    // Build consumer, subscribe to cfg.SignalsTopic.
+}
+
+// Poll reads a StrategySignal from Kafka or returns nil if there is no message.
+// It should respect context cancellation and return an error on fatal errors.
+func (c *SignalsConsumer) Poll(ctx context.Context) (*engine.StrategySignal, error) {
+    // Poll, deserialize JSON to StrategySignal.
+    // Normalize Symbol to upper-case.
+    // Parse Time as time.Time.
+}
+
+5.2 Candles consumer (internal/kafka/candles_consumer.go)
+
+// CandlesConsumer wraps a Kafka consumer that reads Candle messages for stocks.
+type CandlesConsumer struct {
+    // underlying Kafka consumer
+    logger *zap.Logger
+}
+
+// NewCandlesConsumer creates a Kafka consumer subscribed to cfg.CandlesTopic.
+func NewCandlesConsumer(cfg KafkaConfig, logger *zap.Logger) (*CandlesConsumer, error) {
+    // Build consumer, subscribe to cfg.CandlesTopic.
+}
+
+// Poll reads a Candle from Kafka or returns nil if there is no message.
+// It respects context cancellation and returns an error on fatal errors.
+func (c *CandlesConsumer) Poll(ctx context.Context) (*engine.Candle, error) {
+    // Poll, deserialize JSON to Candle, normalize symbol, parse time.
+}
+
+> NOTE: We can use **separate consumer groups** by giving both consumers the same GroupID (fine), or we can have them share – for v1, simplest is **two separate consumers**; each has same group ID but different topic.
+
+5.3 Trades + PnL producer (internal/kafka/trades_producer.go)
+
+// EngineProducer wraps a Kafka producer for trade and PnL events.
+type EngineProducer struct {
+    // underlying Kafka producer
+    tradesTopic string
+    pnlTopic    string
+    logger      *zap.Logger
+}
+
+// NewEngineProducer creates a new Kafka producer for trades and PnL topics.
+func NewEngineProducer(cfg KafkaConfig, logger *zap.Logger) (*EngineProducer, error) {
+    // Initialize producer for cfg.TradesTopic and cfg.PnlTopic.
+}
+
+// PublishTrade serializes and publishes a TradeEvent to the trades topic.
+func (p *EngineProducer) PublishTrade(ctx context.Context, t engine.TradeEvent) error {
+    // JSON encode, produce to p.tradesTopic with key = t.Symbol.
+}
+
+// PublishPnlSnapshot serializes and publishes a PnlSnapshot to the pnl topic.
+func (p *EngineProducer) PublishPnlSnapshot(ctx context.Context, s engine.PnlSnapshot) error {
+    // JSON encode, produce to p.pnlTopic.
+}
+
+// Flush flushes all pending messages before shutdown.
+func (p *EngineProducer) Flush(timeout time.Duration) error {
+    // call underlying Flush/Close
+}
+
+=====================================================================
+6. ENGINE TYPES & STATE (internal/engine/types.go & state.go)
+=====================================================================
+
+6.1 Position model (types.go)
+
+// PositionSide describes the side of an open position.
+type PositionSide string
+
+const (
+    SideLong PositionSide = "LONG"
+    // future: SideShort
+)
+
+// Position represents a single-symbol intraday position (v1: LONG-only).
+type Position struct {
+    Symbol       string        `json:"symbol"`
+    Side         PositionSide  `json:"side"`   // "LONG"
+    Quantity     int64         `json:"quantity"`
+    AvgEntry     float64       `json:"avg_entry"`
+    EntryTime    time.Time     `json:"entry_time"`
+    Strategy     string        `json:"strategy"`
+    LastCandle   *Candle       `json:"-"`
+}
+
+6.2 Daily engine state (state.go)
+
+// DailyState holds PnL and risk counters for the current trading day.
+type DailyState struct {
+    Date           time.Time          // trading date in configured timezone
+    RealizedPnl    float64
+    UnrealizedPnl  float64
+    MaxDrawdown    float64
+    TradesToday    int
+    TradingHalted  bool               // true if MaxDailyLoss hit
+}
+
+// EngineState holds all in-memory state for the paper engine.
+type EngineState struct {
+    Positions map[string]*Position  // symbol -> position
+    Daily     DailyState
+
+    Risk     config.RiskConfig
+    Trading  config.TradingConfig
+    Tz       *time.Location
+
+    logger   *zap.Logger
+}
+
+// NewEngineState constructs an EngineState for a new trading day.
+func NewEngineState(risk config.RiskConfig, trading config.TradingConfig, tz *time.Location, logger *zap.Logger) *EngineState {
+    // Initialize positions map, DailyState.Date to today's date in tz, etc.
+}
+
+=====================================================================
+7. CORE ENGINE LOGIC (internal/engine/processor.go)
+=====================================================================
+
+// Engine encapsulates the core logic for handling signals, candles, positions, and risk.
+type Engine struct {
+    state *EngineState
+    logger *zap.Logger
+}
+
+// NewEngine creates a new Engine instance with the given state and logger.
+func NewEngine(state *EngineState, logger *zap.Logger) *Engine {
+    // store pointers
+}
+
+7.1 Time window helpers
+
+We need helpers to:
+
+- Check if a time is inside the configured entry window.
+- Check if we crossed EOD flat time.
+- Detect new trading day.
+
+Implement helper methods on Engine or EngineState:
+
+// IsWithinEntryWindow returns true if the candleTime is between entry_start and entry_end.
+func (e *Engine) IsWithinEntryWindow(t time.Time) bool {
+    // Use Trading.EntryStart, Trading.EntryEnd (HH:MM) in e.state.Tz
+}
+
+// IsAfterEODFlatTime returns true if the candleTime is >= EOD flat time.
+func (e *Engine) IsAfterEODFlatTime(t time.Time) bool {
+    // Use Trading.EODFlatTime
+}
+
+// CheckAndResetDayIfNeeded detects date change and resets daily state and positions.
+// For v1, you may close any remaining positions at last known MTM before reset.
+func (e *Engine) CheckAndResetDayIfNeeded(now time.Time) {
+    // Compare e.state.Daily.Date (in tz) with now.In(tz).Date()
+    // If different, reset Daily, Positions, etc.
+}
+
+7.2 Signal handling
+
+// OnSignal processes a new StrategySignal and decides whether to open a new paper position.
+// It applies trading window, daily risk limits, max open positions, and per-day trade count.
+// It does NOT execute the trade immediately; instead it assumes entry at the most recent candle close.
+func (e *Engine) OnSignal(sig StrategySignal, latestCandle *Candle) (*TradeEvent, error) {
+    // 1. Normalize symbol to upper-case.
+    // 2. Convert sig.Time to engine timezone.
+    // 3. If state.Daily.TradingHalted == true -> ignore, return nil.
+    // 4. If not IsWithinEntryWindow(sig.Time) -> ignore, return nil.
+    // 5. If open positions >= Risk.MaxOpenPositions -> ignore, return nil.
+    // 6. If tradesToday >= Risk.MaxTradesPerDay -> ignore, return nil.
+    // 7. If there is already an open position for this symbol -> ignore (v1: one trade per symbol).
+    // 8. Determine entry price:
+    //      - If latestCandle != nil for this symbol:
+    //          use latestCandle.Close as entry price.
+    //        else:
+    //          log warning and ignore signal (no price context).
+    // 9. Compute quantity:
+    //      qty = floor(Risk.CapitalPerTrade / entryPrice)
+    //      if qty <= 0 -> ignore (price too high vs capital).
+    // 10. Create new Position:
+    //      - Symbol, SideLong, Quantity, AvgEntry=entryPrice, EntryTime=sig.Time, Strategy=sig.Strategy
+    // 11. Add to state.Positions and increment Daily.TradesToday.
+    // 12. Build TradeEvent of type TradeEntry with Reason = "ENTRY_FROM_SIGNAL".
+    // 13. Return TradeEvent pointer.
+}
+
+Note: You can maintain a map of latest candles by symbol in the Engine, updated in OnCandle, and pass it into OnSignal.
+
+7.3 Candle handling (SL/Target/EOD/MTM)
+
+// OnCandle processes a new Candle, updates unrealized PnL for open positions,
+// checks stop-loss and target exits, and optionally EOD flattening.
+// It returns zero or more TradeEvent exits generated by this candle.
+func (e *Engine) OnCandle(c Candle) ([]TradeEvent, error) {
+    // 1. Normalize symbol and time to tz.
+    // 2. CheckAndResetDayIfNeeded(c.Time).
+    // 3. If there is an open position for c.Symbol:
+    //      - For LONG:
+    //           slPrice     = position.AvgEntry * (1 - Risk.PerTradeSLPct/100)
+    //           targetPrice = position.AvgEntry * (1 + Risk.PerTradeTargetPct/100)
+    //        Use candle O/H/L/C to decide if SL or target is hit in this candle.
+    //
+    //        Pseudo:
+    //           hitSL := c.Low <= slPrice
+    //           hitTP := c.High >= targetPrice
+    //
+    //        Rule v1 (conservative):
+    //          - If hitSL:
+    //               exitPrice = slPrice
+    //               reason = "EXIT_SL_HIT"
+    //          - Else if hitTP:
+    //               exitPrice = targetPrice
+    //               reason = "EXIT_TARGET_HIT"
+    //          - Else if IsAfterEODFlatTime(c.Time):
+    //               exitPrice = c.Close
+    //               reason = "EXIT_EOD"
+    //          - Else: no exit.
+    //
+    //        If we exit:
+    //           realized = (exitPrice - AvgEntry) * Quantity
+    //           update Daily.RealizedPnl += realized
+    //           update drawdown: compare Daily.RealizedPnl vs previous peak.
+    //           remove position from Positions map.
+    //           build TradeEvent of type TradeExit with RealizedPnl set.
+    //
+    // 4. After processing exits, recompute UnrealizedPnl for all remaining positions:
+    //      - For each open position p:
+    //           if we have a recent candle for p.Symbol (including c if same symbol):
+    //              mtmPrice = lastClose
+    //              unreal += (mtmPrice - p.AvgEntry) * p.Quantity
+    //      - state.Daily.UnrealizedPnl = unreal
+    //
+    // 5. Check daily loss limit:
+    //      if Daily.RealizedPnl <= -Risk.MaxDailyLoss:
+    //          set Daily.TradingHalted = true
+    //          // (For v1, DO NOT auto-close open positions here; they still follow SL/TP/EOD.)
+    //
+    // 6. Return slice of exit TradeEvents.
+}
+
+7.4 PnL snapshot creation
+
+// BuildPnlSnapshot builds a PnlSnapshot from the current engine state at the given time.
+func (e *Engine) BuildPnlSnapshot(now time.Time) PnlSnapshot {
+    // Uses e.state.Daily.* and len(e.state.Positions).
+}
+
+=====================================================================
+8. MAIN SERVICE (cmd/paper_engine/main.go)
+=====================================================================
+
+// main is the entrypoint for the paper trading engine.
+// It wires up configuration, logging, Kafka consumers/producers, and the Engine,
+// then runs a loop that processes both signals and candles until shutdown.
+func main() {
+    // 1. Load config from "paper_engine/config/paper_engine_config.json".
+    // 2. Initialize logger.
+    // 3. Create SignalsConsumer, CandlesConsumer, and EngineProducer.
+    // 4. Load timezone with time.LoadLocation(cfg.Trading.Timezone).
+    // 5. Create EngineState and Engine.
+    // 6. Create context with cancel, handle SIGINT/SIGTERM to cancel.
+    // 7. Start:
+    //      - commit ticker: cfg.Kafka.CommitIntervalMs
+    //      - mtm snapshot ticker: cfg.Trading.MtmSnapshotIntervalSec
+    //
+    // 8. Main loop:
+    //      for {
+    //          select {
+    //          case <-ctx.Done():
+    //              goto SHUTDOWN
+    //
+    //          case <-commitTicker.C:
+    //              // Best-effort commit on both consumers:
+    //              signalsConsumer.Commit()
+    //              candlesConsumer.Commit()
+    //
+    //          case <-pnlTicker.C:
+    //              snapshot := engine.BuildPnlSnapshot(time.Now().In(tz))
+    //              producer.PublishPnlSnapshot(ctx, snapshot)
+    //
+    //          default:
+    //              // Poll signals and candles in a non-blocking or interleaved way.
+    //              // E.g., poll signals, then candles, with small timeouts or use separate goroutines + channels.
+    //
+    //              if sig, err := signalsConsumer.Poll(ctx); err != nil {
+    //                  logger.Error("signals poll error", zap.Error(err))
+    //              } else if sig != nil {
+    //                  // Look up latest candle for this symbol from engine's internal cache if needed.
+    //                  latestCandle := engine.GetLatestCandleForSymbol(sig.Symbol) // helper method
+    //                  if trade, err := engine.OnSignal(*sig, latestCandle); err != nil {
+    //                      logger.Error("OnSignal error", zap.Error(err))
+    //                  } else if trade != nil {
+    //                      producer.PublishTrade(ctx, *trade)
+    //                  }
+    //              }
+    //
+    //              if candle, err := candlesConsumer.Poll(ctx); err != nil {
+    //                  logger.Error("candles poll error", zap.Error(err))
+    //              } else if candle != nil {
+    //                  engine.UpdateLatestCandle(*candle) // store in internal cache for entries
+    //                  trades, err := engine.OnCandle(*candle)
+    //                  if err != nil {
+    //                      logger.Error("OnCandle error", zap.Error(err))
+    //                  }
+    //                  for _, tr := range trades {
+    //                      producer.PublishTrade(ctx, tr)
+    //                  }
+    //              }
+    //          }
+    //      }
+    //
+    // 9. SHUTDOWN:
+    //      - Build one last PnL snapshot and publish.
+    //      - Flush producer.
+    //      - Close consumers if necessary.
+    //      - Log "shutdown complete" and exit.
+}
+
+=====================================================================
+9. ERROR HANDLING
+=====================================================================
+
+- JSON unmarshal error (signals or candles):
+  - Log warning with enough context (topic, raw value truncated).
+  - Skip and continue.
+
+- Time parse error:
+  - Log and skip that message.
+
+- Kafka poll error:
+  - Log; if fatal, exit main (return error) and let supervisor restart.
+
+- Kafka produce error:
+  - Log error; skip that event. Do NOT panic.
+
+- Panics:
+  - Optional: recover in main, log stack trace, then exit.
+
+=====================================================================
+10. STYLE & COMMENTS
+=====================================================================
+
+- Use Go 1.20+.
+- Keep functions small and focused.
+- For EVERY exported function and method:
+  - Add a short comment block describing what it does, inputs, outputs, and its role.
+
+Example:
+
+// OnCandle processes a new market candle, updates positions and PnL,
+// and emits any TradeEvent exits triggered by stop-loss, target, or end-of-day flattening.
+func (e *Engine) OnCandle(c Candle) ([]TradeEvent, error) { ... }
+
+Do NOT add any live broker connectivity here.  
+This is **pure simulation + risk**, reading from Kafka and writing to Kafka.
+
+=====================================================================
+END OF SPEC
+=====================================================================
