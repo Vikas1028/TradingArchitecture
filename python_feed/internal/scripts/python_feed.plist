@@ -18,9 +18,9 @@
     <string>/usr/local/python_feed</string>
 
     <key>StandardOutPath</key>
-    <string>/usr/local/python_feed/logs/ws_feed_service.log</string>
+    <string>/usr/local/python_feed/logs/service.log</string>
     <key>StandardErrorPath</key>
-    <string>/usr/local/python_feed/logs/ws_feed_service.log</string>
+    <string>/usr/local/python_feed/logs/service.log</string>
 
     <key>RunAtLoad</key>
     <true/>

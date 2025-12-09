@@ -27,6 +27,7 @@ DEFAULT_CONFIG_PATH = Path(__file__).resolve().parents[1] / "config" / "ws_feed_
 # - tuple of (symbol, exchange).
 # Flow: split exchange/symbol, strip suffixes, handle index aliases.
 def _derive_symbol(instrument: str) -> Tuple[str, str]:
+    logging.getLogger("ws_feed_service").debug("Deriving symbol for instrument=%s", instrument)
     if ":" in instrument:
         exchange, symbol_part = instrument.split(":", 1)
     else:
@@ -49,6 +50,8 @@ def build_token_maps(
     instruments: List[str],
     explicit_token_map: Dict[str, str] | None = None,
 ) -> Tuple[List[str], Dict[str, Tuple[str, str]], Dict[str, str]]:
+    logger = logging.getLogger("ws_feed_service")
+    logger.debug("Building token maps for %s instruments (explicit map size=%s)", len(instruments), len(explicit_token_map or {}))
     tokens: List[str] = []
     token_to_meta: Dict[str, Tuple[str, str]] = {}
     instrument_to_token: Dict[str, str] = {}
@@ -62,6 +65,7 @@ def build_token_maps(
         tokens.append(token)
         token_to_meta[token] = (symbol, exchange)
         instrument_to_token[instrument] = token
+        logger.debug("Mapped instrument=%s -> token=%s symbol=%s exchange=%s", instrument, token, symbol, exchange)
     return tokens, token_to_meta, instrument_to_token
 
 
@@ -78,6 +82,7 @@ def _install_signal_handlers(shutdown_event: threading.Event, logger: logging.Lo
 
     signal.signal(signal.SIGINT, _handler)
     signal.signal(signal.SIGTERM, _handler)
+    logger.debug("Signal handlers installed for SIGINT and SIGTERM")
 
 
 # _start_health_thread spins a background thread to periodically log health metrics.
@@ -95,6 +100,7 @@ def _start_health_thread(health_monitor: HealthMonitor, shutdown_event: threadin
 
     thread = threading.Thread(target=_runner, name="health-monitor", daemon=True)
     thread.start()
+    logging.getLogger("ws_feed_service").debug("Health monitor thread started (name=%s)", thread.name)
     return thread
 
 
@@ -109,13 +115,16 @@ def main() -> None:
 
     cfg = load_config(args.config)
     logger = setup_logging(cfg["log"].get("level", "INFO"), cfg["log"].get("file", "logs/ws_feed_service.log"))
+    logger.info("Configuration loaded from %s", args.config)
     metrics.start_metrics_server(9000)
     metrics.WS_CONNECTED.set(0)
     metrics.KAFKA_CONNECTED.set(0)
 
     instruments = (cfg.get("symbols", {}).get("indices") or []) + (cfg.get("symbols", {}).get("equities") or [])
+    logger.info("Preparing subscription for %s instruments", len(instruments))
     token_overrides = cfg.get("token_map") or {}
     tokens, token_map, instrument_token_map = build_token_maps(instruments, token_overrides)
+    logger.info("Token map built: %s tokens (overrides=%s)", len(tokens), len(token_overrides))
 
     kafka_cfg = cfg.get("kafka", {})
     producer = KafkaTickProducer(
@@ -126,6 +135,7 @@ def main() -> None:
         batch_size=int(kafka_cfg.get("batch_size", 32768)),
         logger=logger,
     )
+    logger.info("Kafka producer initialized for topic=%s", kafka_cfg.get("topic"))
 
     health_monitor = HealthMonitor(logger, int(cfg.get("health", {}).get("print_stats_interval_sec", 60)))
 

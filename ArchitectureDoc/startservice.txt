@@ -1,0 +1,25 @@
+launchctl bootout gui/$(id -u)/com.paper_engine.service 2>/dev/null || true
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.paper_engine.service.plist
+launchctl print gui/$(id -u)/com.paper_engine.service
+
+
+
+launchctl bootout gui/$(id -u)/com.vwap_strategy.service 2>/dev/null || true
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.vwap_strategy.service.plist
+launchctl print gui/$(id -u)/com.vwap_strategy.service
+
+
+
+launchctl bootout gui/$(id -u)/com.marketdata.service 2>/dev/null || true
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.marketdata.service.plist
+launchctl print gui/$(id -u)/com.marketdata.service
+
+
+
+launchctl bootout gui/$(id -u)/com.python_feed.service 2>/dev/null || true
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.python_feed.service.plist
+launchctl print gui/$(id -u)/com.python_feed.service
+
+
+
+env EDITOR=nano crontab -e

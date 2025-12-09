@@ -19,6 +19,7 @@ DEFAULT_CONFIG_PATH = Path(__file__).resolve().parents[2] / "config" / "ws_feed_
 def load_config(path: str | Path = DEFAULT_CONFIG_PATH) -> Dict[str, Any]:
     logger = logging.getLogger("ws_feed_service")
     cfg_path = Path(path).expanduser()
+    logger.info("Loading config from %s", cfg_path)
     if not cfg_path.exists():
         raise FileNotFoundError(f"Config file not found: {cfg_path}")
 
@@ -27,11 +28,12 @@ def load_config(path: str | Path = DEFAULT_CONFIG_PATH) -> Dict[str, Any]:
     except json.JSONDecodeError as exc:
         raise ValueError(f"Invalid JSON in config: {exc}") from exc
 
+    logger.debug("Parsing JSON config")
     cfg.setdefault("angel", {})
     cfg.setdefault("kafka", {})
     cfg.setdefault("symbols", {"indices": [], "equities": []})
     cfg.setdefault("token_map", {})
-    cfg.setdefault("log", {"level": "INFO", "file": "logs/ws_feed_service.log"})
+    cfg.setdefault("log", {"level": "INFO", "file": "logs/app.log"})
     cfg.setdefault("reconnect", {"max_retries": 0, "backoff_seconds": 5})
     cfg.setdefault("health", {"print_stats_interval_sec": 60})
 
@@ -45,6 +47,7 @@ def load_config(path: str | Path = DEFAULT_CONFIG_PATH) -> Dict[str, Any]:
     if missing:
         missing_str = ", ".join(f"{sec}.{key}" for sec, key in missing)
         raise ValueError(f"Missing required config fields: {missing_str}")
+    logger.info("Config required fields present")
 
     # Warn on optional gaps.
     optional_defaults = {
@@ -56,7 +59,7 @@ def load_config(path: str | Path = DEFAULT_CONFIG_PATH) -> Dict[str, Any]:
         ("kafka", "linger_ms"): 5,
         ("kafka", "batch_size"): 32768,
         ("log", "level"): "INFO",
-        ("log", "file"): "logs/ws_feed_service.log",
+        ("log", "file"): "logs/app.log",
         ("reconnect", "max_retries"): 0,
         ("reconnect", "backoff_seconds"): 5,
         ("health", "print_stats_interval_sec"): 60,
@@ -70,5 +73,11 @@ def load_config(path: str | Path = DEFAULT_CONFIG_PATH) -> Dict[str, Any]:
     log_path = Path(cfg["log"]["file"]).expanduser()
     log_path.parent.mkdir(parents=True, exist_ok=True)
     cfg["log"]["file"] = str(log_path)
+    logger.info(
+        "Config loaded: instruments=%s, kafka_topic=%s, log_file=%s",
+        len((cfg.get("symbols", {}).get("indices") or []) + (cfg.get("symbols", {}).get("equities") or [])),
+        cfg.get("kafka", {}).get("topic"),
+        cfg["log"]["file"],
+    )
 
     return cfg

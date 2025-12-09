@@ -133,7 +133,7 @@
   "log_comment": "Logging configuration: level and output file path.",
   "log": {
     "level": "INFO",
-    "file": "python_feed/logs/ws_feed_service.log"
+    "file": "logs/app.log"
   },
   "reconnect_comment": "Reconnect behavior: max_retries=0 means infinite retries; backoff_seconds between attempts.",
   "reconnect": {

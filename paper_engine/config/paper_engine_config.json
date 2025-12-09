@@ -10,7 +10,7 @@
     "commit_interval_ms": 1000
   },
   "log": {
-    "level": "INFO",
+    "level": "DEBUG",
     "file": "logs/paper_engine.log"
   },
   "trading": {

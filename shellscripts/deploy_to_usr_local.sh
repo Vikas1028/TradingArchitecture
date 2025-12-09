@@ -1,15 +1,17 @@
 #!/usr/bin/env bash
 # Deploy release folders from uat-release to /usr/local and install launchd plist.
-# Usage: run this script from the uat-release directory. It will prompt for which app to deploy.
+# Usage: run this script from anywhere; it will prompt for which app to deploy.
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+RELEASE_DIR="${REPO_ROOT}/uat-release"
 AGENT_DIR="${HOME}/Library/LaunchAgents"
 
 deploy_app() {
     local app="$1"
-    local src="${SCRIPT_DIR}/${app}"
+    local src="${RELEASE_DIR}/${app}"
     local dest="/usr/local/${app}"
     local plist_target="${AGENT_DIR}/com.${app}.service.plist"
 
@@ -34,12 +36,7 @@ deploy_app() {
     # Ensure logs directory exists
     sudo mkdir -p "${dest}/logs"
 
-    # Reload launchd for this app
-    launchctl bootout "gui/$(id -u)/com.${app}.service" >/dev/null 2>&1 || true
-    if [[ -f "${plist_target}" ]]; then
-        launchctl bootstrap "gui/$(id -u)" "${plist_target}"
-        echo "Launchd service loaded: com.${app}.service"
-    fi
+    # Service is not started here; only files are placed. Use launchctl separately to start.
 }
 
 echo "Which application to deploy?"

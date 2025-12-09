@@ -38,6 +38,14 @@ class KafkaTickProducer:
         self.topic = topic
         self.logger = logger
         self._producer: Optional[Producer] = None
+        self.logger.info(
+            "Initializing Kafka producer: brokers=%s topic=%s acks=%s linger_ms=%s batch_size=%s",
+            bootstrap_servers,
+            topic,
+            acks,
+            linger_ms,
+            batch_size,
+        )
         if Producer:
             conf = {
                 "bootstrap.servers": bootstrap_servers,
@@ -48,8 +56,13 @@ class KafkaTickProducer:
                 "queue.buffering.max.kbytes": 1048576,  # 1 GB buffer
                 "message.timeout.ms": 30000,
             }
-            self._producer = Producer(conf)
-            metrics.KAFKA_CONNECTED.set(1)
+            try:
+                self._producer = Producer(conf)
+                metrics.KAFKA_CONNECTED.set(1)
+                self.logger.info("Kafka producer created successfully")
+            except Exception as exc:  # pylint: disable=broad-except
+                self.logger.error("Failed to create Kafka producer: %s", exc)
+                metrics.KAFKA_CONNECTED.set(0)
         else:
             self.logger.warning("confluent_kafka not installed; Kafka publishing disabled")
             metrics.KAFKA_CONNECTED.set(0)
@@ -65,6 +78,7 @@ class KafkaTickProducer:
             self.logger.debug("Kafka disabled; dropping tick for %s", tick.get("symbol"))
             return
         try:
+            self.logger.debug("Producing tick for %s to topic=%s", tick.get("symbol"), self.topic)
             self._producer.produce(
                 topic=self.topic,
                 key=str(tick.get("symbol", "")),
@@ -75,12 +89,12 @@ class KafkaTickProducer:
             self._producer.poll(0)
             metrics.KAFKA_CONNECTED.set(1)
             metrics.TICKS_PUBLISHED.inc()
+        except BufferError:
+            self.logger.warning("Local Kafka producer queue full; dropping tick for %s", tick.get("symbol"))
+            metrics.ERRORS_TOTAL.inc()
         except KafkaException as exc:  # type: ignore[misc]
             self.logger.error("Kafka produce failed: %s", exc)
             metrics.KAFKA_CONNECTED.set(0)
-            metrics.ERRORS_TOTAL.inc()
-        except BufferError:
-            self.logger.warning("Local Kafka producer queue full; dropping tick for %s", tick.get("symbol"))
             metrics.ERRORS_TOTAL.inc()
 
     # flush drains producer buffers to Kafka.
@@ -89,6 +103,7 @@ class KafkaTickProducer:
     # Flow: call Producer.flush if available.
     def flush(self) -> None:
         if self._producer:
+            self.logger.info("Flushing Kafka producer buffers")
             self._producer.flush()
 
     # close flushes and releases producer resources.
@@ -96,6 +111,7 @@ class KafkaTickProducer:
     # Returns: None.
     # Flow: flush outstanding messages, drop producer reference.
     def close(self) -> None:
+        self.logger.info("Closing Kafka producer")
         self.flush()
         self._producer = None
         metrics.KAFKA_CONNECTED.set(0)
@@ -109,3 +125,14 @@ class KafkaTickProducer:
     def _delivery_report(self, err: Any, msg: Any) -> None:  # pylint: disable=unused-argument
         if err:
             self.logger.error("Kafka delivery error: %s", err)
+            metrics.ERRORS_TOTAL.inc()
+        else:
+            try:
+                self.logger.debug(
+                    "Kafka delivery success topic=%s partition=%s offset=%s",
+                    msg.topic(),
+                    msg.partition(),
+                    msg.offset(),
+                )
+            except Exception:  # pylint: disable=broad-except
+                self.logger.debug("Kafka delivery success")

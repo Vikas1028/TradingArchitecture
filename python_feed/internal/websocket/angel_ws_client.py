@@ -69,6 +69,11 @@ class AngelWSClient:
         self._ws: Optional[SmartWebSocketV2] = None
         self._session: Optional[AngelSession] = None
         self._connected = threading.Event()
+        self.logger.debug(
+            "AngelWSClient initialized: instruments=%s tokens=%s",
+            len((cfg.get("symbols", {}).get("indices") or []) + (cfg.get("symbols", {}).get("equities") or [])),
+            len(token_mapping),
+        )
 
     # connect creates an authenticated session and initializes websocket callbacks.
     # Parameters: None.
@@ -76,6 +81,11 @@ class AngelWSClient:
     # Flow: build Angel session, instantiate SmartWebSocketV2, set callbacks, ready for run_forever.
     def connect(self) -> None:
         self._session = create_angel_session(self.cfg.get("angel", {}), self.logger)
+        self.logger.info(
+            "Starting websocket connect using client_id=%s feed_token_present=%s",
+            self._session.client_id,
+            bool(self._session.feed_token),
+        )
         ws = SmartWebSocketV2(
             auth_token=self._session.access_token or self._session.refresh_token,
             api_key=self._session.api_key,
@@ -89,6 +99,7 @@ class AngelWSClient:
         ws.on_error = self._on_error
         ws.on_close = self._on_close
         self._ws = ws
+        self.logger.debug("Websocket callbacks registered")
 
     # disconnect closes websocket connection and resets flags.
     # Parameters: None.
@@ -100,6 +111,8 @@ class AngelWSClient:
                 self._ws.close_connection()
             except Exception as exc:  # pylint: disable=broad-except
                 self.logger.warning("Failed to close websocket cleanly: %s", exc)
+            else:
+                self.logger.info("Websocket close requested")
         self._connected.clear()
         metrics.WS_CONNECTED.set(0)
 
@@ -120,6 +133,7 @@ class AngelWSClient:
         try:
             self._ws.subscribe("python-feed", 2, payload)
             self.logger.info("Subscribed %s tokens", len(tokens))
+            self.logger.debug("Subscribed token list: %s", tokens)
         except Exception as exc:  # pylint: disable=broad-except
             self.logger.error("Failed to subscribe tokens: %s", exc)
             raise
@@ -133,6 +147,7 @@ class AngelWSClient:
         if not self._ws:
             raise RuntimeError("Websocket not initialized. Call connect() first.")
         ws = self._ws
+        self.logger.info("Starting websocket loop")
 
         def _connect_blocking() -> None:
             try:
@@ -146,6 +161,7 @@ class AngelWSClient:
 
         thread = threading.Thread(target=_connect_blocking, name="angel-ws", daemon=True)
         thread.start()
+        self.logger.debug("Websocket connect thread started (alive=%s)", thread.is_alive())
 
         try:
             while not shutdown_event.is_set() and thread.is_alive():
@@ -157,6 +173,7 @@ class AngelWSClient:
         finally:
             self.disconnect()
             thread.join(timeout=2)
+            self.logger.debug("Websocket thread joined (alive=%s)", thread.is_alive())
 
     # _on_open marks connection as live and triggers initial subscription.
     # Parameters:
@@ -186,6 +203,9 @@ class AngelWSClient:
         if tick:
             metrics.TICKS_RECEIVED.inc()
             self.tick_handler(tick)
+            self.logger.debug("Tick processed for %s at %s", tick.get("symbol"), tick.get("time"))
+        else:
+            self.logger.debug("Dropped tick payload: %s", message)
 
     # _on_error logs errors and clears connected flag.
     # Parameters:
@@ -226,6 +246,7 @@ class AngelWSClient:
                 self.logger.warning("Skip non-JSON tick payload: %s", raw_msg)
                 return None
         if not isinstance(msg, dict):
+            self.logger.debug("Unexpected tick payload type: %s", type(msg))
             return None
 
         token = msg.get("token") or msg.get("instrument_token") or msg.get("instrumentToken")
@@ -249,11 +270,13 @@ class AngelWSClient:
             ltp_value = float(ltp) if ltp is not None else None
         except (TypeError, ValueError):
             ltp_value = None
+            self.logger.debug("Invalid LTP for token %s payload=%s", token, msg)
 
         try:
             volume_value = int(volume) if volume is not None else 0
         except (TypeError, ValueError):
             volume_value = 0
+            self.logger.debug("Invalid volume for token %s payload=%s", token, msg)
 
         return {
             "symbol": symbol,
@@ -273,11 +296,13 @@ class AngelWSClient:
     # Flow: attempt to parse, fall back to current time.
     def _parse_timestamp(self, raw_value: Any) -> str:
         if not raw_value:
+            self.logger.debug("Missing timestamp in tick; defaulting to now()")
             return datetime.now(timezone.utc).astimezone().isoformat()
         if isinstance(raw_value, (int, float)):
             try:
                 return datetime.fromtimestamp(float(raw_value), tz=timezone.utc).astimezone().isoformat()
             except (OverflowError, OSError, ValueError):
+                self.logger.debug("Failed to parse numeric timestamp %s; defaulting to now()", raw_value)
                 return datetime.now(timezone.utc).astimezone().isoformat()
         text = str(raw_value).strip()
         if text.endswith("Z"):
@@ -288,4 +313,5 @@ class AngelWSClient:
                 dt_value = dt_value.replace(tzinfo=timezone.utc)
             return dt_value.astimezone().isoformat()
         except ValueError:
+            self.logger.debug("Failed to parse timestamp %s; defaulting to now()", raw_value)
             return datetime.now(timezone.utc).astimezone().isoformat()

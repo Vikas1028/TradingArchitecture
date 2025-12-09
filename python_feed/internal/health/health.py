@@ -23,6 +23,7 @@ class HealthMonitor:
         self.last_total = 0
         self.last_report_time = time.time()
         self.connected = False
+        self.logger.info("HealthMonitor initialized interval=%ss", self.interval_sec)
 
     # on_tick increments tick counter for each processed tick.
     # Parameters: None.
@@ -30,6 +31,7 @@ class HealthMonitor:
     # Flow: increment total tick count.
     def on_tick(self) -> None:
         self.total_ticks += 1
+        # Avoid noisy per-tick logging; rely on periodic reports.
 
     # set_connected updates connection status flag.
     # Parameters:
@@ -37,6 +39,8 @@ class HealthMonitor:
     # Returns: None.
     # Flow: set connected flag used in reports.
     def set_connected(self, value: bool) -> None:
+        if self.connected != value:
+            self.logger.info("Connection state changed: %s -> %s", self.connected, value)
         self.connected = value
 
     # maybe_report logs health stats if the interval has elapsed.

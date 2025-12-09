@@ -36,6 +36,7 @@ class AngelSession:
 # - AngelSession instance (real if SmartAPI SDK available, otherwise config-supplied tokens).
 # Flow: if SmartConnect + password + TOTP present, perform login to obtain fresh tokens; otherwise fall back to provided tokens.
 def create_angel_session(angel_cfg: Dict[str, Any], logger: logging.Logger) -> AngelSession:
+    logger.info("Creating Angel session for client_id=%s", angel_cfg.get("client_id"))
     required = ["api_key", "client_id"]
     for key in required:
         if not angel_cfg.get(key):
@@ -87,6 +88,7 @@ def create_angel_session(angel_cfg: Dict[str, Any], logger: logging.Logger) -> A
     access_token = angel_cfg.get("access_token") or refresh_token
     if not feed_token:
         raise ValueError("Angel feed_token/refresh_token not provided and login unavailable")
+    logger.info("Using provided tokens for client_id=%s (feed_token present=%s)", client_id, bool(feed_token))
     return AngelSession(
         api_key=api_key,
         client_id=client_id,
