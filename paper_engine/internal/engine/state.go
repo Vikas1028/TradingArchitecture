@@ -21,9 +21,10 @@ type DailyState struct {
 
 // EngineState holds in-memory positions, daily state, and latest candles.
 type EngineState struct {
-	Positions     map[string]*Position
-	LatestCandles map[string]*Candle
-	Daily         DailyState
+	Positions      map[string]*Position
+	LatestCandles  map[string]*Candle
+	PendingSignals map[string]*PendingSignal
+	Daily          DailyState
 
 	Risk    config.RiskConfig
 	Trading config.TradingConfig
@@ -38,8 +39,9 @@ type EngineState struct {
 func NewEngineState(risk config.RiskConfig, trading config.TradingConfig, tz *time.Location, logger *zap.Logger) *EngineState {
 	now := time.Now().In(tz)
 	return &EngineState{
-		Positions:     make(map[string]*Position),
-		LatestCandles: make(map[string]*Candle),
+		Positions:      make(map[string]*Position),
+		LatestCandles:  make(map[string]*Candle),
+		PendingSignals: make(map[string]*PendingSignal),
 		Daily: DailyState{
 			Date: now,
 		},

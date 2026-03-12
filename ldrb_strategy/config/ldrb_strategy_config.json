@@ -1,0 +1,61 @@
+{
+  "env": "prod",
+  "kafka": {
+    "bootstrap_servers": "localhost:9092",
+    "group_id": "ldrb-strategy",
+    "stock_candles_topic": "candles.1m",
+    "index_candles_topic": "indices.1m",
+    "signal_topic": "signals.strategy",
+    "commit_interval_ms": 1000,
+    "startup_replay_grace_sec": 120
+  },
+  "log": {
+    "level": "DEBUG",
+    "file": "logs/ldrb_strategy.log"
+  },
+  "dependencies": {
+    "events_path": "/Users/vikasbhandekar/Desktop/TradingArchitecture/ldrb_strategy/data/events_next_day.json",
+    "volume_profile_path": "/Users/vikasbhandekar/Desktop/TradingArchitecture/ldrb_strategy/data/volume_profile_10d.json",
+    "turnover_ranking_path": "/Users/vikasbhandekar/Desktop/TradingArchitecture/stocks/nifty500_turnover.csv",
+    "enable_safe_mode": true,
+    "allow_rvol_fallback": true,
+    "skip_all_if_events_missing": true
+  },
+  "strategy": {
+    "timezone": "Asia/Kolkata",
+    "session_start": "09:15",
+    "entry_start": "14:30",
+    "entry_end": "15:15",
+    "same_day_exit_cutoff": "15:25",
+    "exit_monitoring_end": "10:30",
+    "capital": 100000,
+    "risk_per_trade_pct": 0.005,
+    "max_trades_per_day": 2,
+    "max_open_overnight": 1,
+    "max_overnight_risk_pct": 0.008,
+    "capital_usage_cap_pct": 0.7,
+    "min_price": 100,
+    "max_intraday_move_pct": 0.04,
+    "body_ratio_min": 0.6,
+    "volume_ratio_min": 2.0,
+    "rvol_min": 1.5,
+    "breakout_cushion_pct": 0.0015,
+    "second_try_extra_pct": 0.001,
+    "slippage_buffer_pct": 0.001,
+    "min_stop_distance_pct": 0.003,
+    "max_stop_distance_pct": 0.012,
+    "gap_up_pct": 0.008,
+    "gap_down_pct": -0.003,
+    "market_drawdown_limit_pct": -0.004,
+    "liquidity_top_n": 200,
+    "min_partial_fill_pct": 0.6,
+    "require_spread_check": false,
+    "max_spread_pct": 0.0015,
+    "swing_start": "11:00",
+    "index_symbol": "NIFTY 50",
+    "enable_market_filter": true,
+    "enable_event_filter": true,
+    "enable_same_day_failure_exit": true
+  }
+}
+

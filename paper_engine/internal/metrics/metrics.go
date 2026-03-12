@@ -9,7 +9,7 @@ import (
 
 // Counters
 var (
-	// SignalsConsumedTotal counts signals consumed from signals.vwap.
+	// SignalsConsumedTotal counts signals consumed from the configured strategy topic.
 	SignalsConsumedTotal = prometheus.NewCounter(prometheus.CounterOpts{
 		Name: "paper_engine_signals_consumed_total",
 		Help: "Total strategy signals consumed",

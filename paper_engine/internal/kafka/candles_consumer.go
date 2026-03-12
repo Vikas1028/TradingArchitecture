@@ -16,9 +16,10 @@ import (
 // CandlesConsumer wraps a Kafka consumer that reads Candle messages for stocks.
 // Inputs: KafkaConfig, logger; Outputs: Candle via Poll.
 type CandlesConsumer struct {
-	reader  *kafka.Reader
-	logger  *zap.Logger
-	lastMsg *kafka.Message
+	reader        *kafka.Reader
+	logger        *zap.Logger
+	lastMsg       *kafka.Message
+	startupCutoff time.Time
 }
 
 // NewCandlesConsumer creates a Kafka consumer subscribed to cfg.CandlesTopic.
@@ -27,15 +28,21 @@ type CandlesConsumer struct {
 func NewCandlesConsumer(cfg cfgpkg.KafkaConfig, logger *zap.Logger) (*CandlesConsumer, error) {
 	reader := kafka.NewReader(kafka.ReaderConfig{
 		Brokers:        []string{cfg.BootstrapServers},
-		GroupID:        cfg.GroupID,
+		GroupID:        cfg.CandlesGroupID,
 		GroupTopics:    []string{cfg.CandlesTopic},
 		MinBytes:       1,
 		MaxBytes:       10e6,
+		StartOffset:    kafka.LastOffset,
 		CommitInterval: 0,
 	})
+	startupCutoff := time.Time{}
+	if cfg.StartupReplayGraceSec > 0 {
+		startupCutoff = time.Now().Add(-time.Duration(cfg.StartupReplayGraceSec) * time.Second)
+	}
 	return &CandlesConsumer{
-		reader: reader,
-		logger: logger,
+		reader:        reader,
+		logger:        logger,
+		startupCutoff: startupCutoff,
 	}, nil
 }
 
@@ -83,6 +90,15 @@ func (c *CandlesConsumer) Poll(ctx context.Context) (*engine.Candle, error) {
 		Close:  raw.Close,
 		Volume: raw.Volume,
 		VWAP:   raw.VWAP,
+	}
+	if !c.startupCutoff.IsZero() && parsedTime.Before(c.startupCutoff) {
+		c.logger.Debug("skipping stale candle from startup backlog",
+			zap.String("symbol", candle.Symbol),
+			zap.Time("candle_time", parsedTime),
+			zap.Time("startup_cutoff", c.startupCutoff),
+		)
+		_ = c.Commit()
+		return nil, nil
 	}
 	return &candle, nil
 }

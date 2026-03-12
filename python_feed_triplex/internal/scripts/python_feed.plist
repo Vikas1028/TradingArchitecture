@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.python_feed_triplex.service</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/zsh</string>
+        <string>-lc</string>
+        <string>until /usr/bin/nc -z 127.0.0.1 9092 &gt;/dev/null 2&gt;&amp;1; do sleep 2; done; exec /usr/bin/python3 -m python_feed_triplex.main.main --config /Users/vikasbhandekar/live_services/python_feed_triplex/config/ws_feed_config.json</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/vikasbhandekar/live_services/python_feed_triplex</string>
+
+    <key>StandardOutPath</key>
+    <string>/Users/vikasbhandekar/live_services/python_feed_triplex/logs/launchd.stdout.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/vikasbhandekar/live_services/python_feed_triplex/logs/launchd.stderr.log</string>
+
+    <key>RunAtLoad</key>
+    <false/>
+    <key>KeepAlive</key>
+    <false/>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+        <key>PYTHONPATH</key>
+        <string>/Users/vikasbhandekar/live_services:/Users/vikasbhandekar/live_services/python_feed_triplex</string>
+    </dict>
+</dict>
+</plist>

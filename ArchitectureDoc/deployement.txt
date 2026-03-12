@@ -6,13 +6,13 @@ Deployment updated for macOS launchd and multiple services (paper_engine, market
 - Launchd plist files live under internal/scripts/<app>.plist and get deployed to ~/Library/LaunchAgents/com.<app>.service.plist.
 - Start/stop scripts for macOS under internal/scripts/start_mac.sh and stop_mac.sh per app.
 - Properties files per app under internal/scripts/<app>.properties.
-- Deployment helper: shellscripts/deploy_to_usr_local.sh prompts for which app(s) to deploy (paper_engine, marketdata, vwap_strategy, python_feed, or all), moves release to /usr/local/<app>, copies plist to LaunchAgents, and bootstraps launchd.
+- Deployment helper: shellscripts/deploy_to_usr_local.sh prompts for which app(s) to deploy (paper_engine, marketdata, vwap_strategy, python_feed, or all), moves release to /Users/vikasbhandekar/live_services/<app>, copies plist to LaunchAgents, and bootstraps launchd.
 - Services run via launchd (macOS); systemd/systemctl is not used.
 
 To deploy/run:
 1) From each app folder, run `make release` to populate ../uat-release/<app>.
-2) From anywhere, run `./shellscripts/deploy_to_usr_local.sh` and choose 1/2/3/4. This moves to /usr/local/<app>, copies plist, and starts the launchd agent.
-3) Verify with `launchctl print gui/$(id -u)/com.<app>.service` and tail logs under /usr/local/<app>/logs/.
+2) From anywhere, run `./shellscripts/deploy_to_usr_local.sh` and choose 1/2/3/4. This moves to /Users/vikasbhandekar/live_services/<app>, copies plist, and starts the launchd agent.
+3) Verify with `launchctl print gui/$(id -u)/com.<app>.service` and tail logs under /Users/vikasbhandekar/live_services/<app>/logs/.
 
 Return them as separate code blocks with filenames as headings.
 =====================================================================

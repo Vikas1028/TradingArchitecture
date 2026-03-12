@@ -26,188 +26,926 @@
     {
       "type": "row",
       "title": "python_feed",
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 }
-    },
-    {
-      "type": "gauge",
-      "title": "WS Connected",
-      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 1 },
-      "targets": [
-        { "expr": "python_feed_ws_connected", "legendFormat": "" }
-      ],
-      "options": { "reduceOptions": { "calcs": ["lastNotNull"] } }
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      }
     },
     {
       "type": "gauge",
       "title": "Kafka Connected",
-      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 1 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "df6gucjnmg1z4a"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 3,
+        "x": 3,
+        "y": 1
+      },
       "targets": [
-        { "expr": "python_feed_kafka_connected", "legendFormat": "" }
+        {
+          "expr": "python_feed_kafka_connected",
+          "legendFormat": "",
+          "refId": "A"
+        }
       ],
-      "options": { "reduceOptions": { "calcs": ["lastNotNull"] } }
-    },
-    {
-      "type": "timeseries",
-      "title": "Ticks Received/s",
-      "gridPos": { "h": 6, "w": 12, "x": 12, "y": 1 },
-      "targets": [
-        { "expr": "rate(python_feed_ticks_received_total[5m])", "legendFormat": "recv/s" },
-        { "expr": "rate(python_feed_ticks_published_total[5m])", "legendFormat": "pub/s" }
-      ]
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      }
     },
     {
       "type": "timeseries",
       "title": "WS Reconnects & Errors",
-      "gridPos": { "h": 6, "w": 12, "x": 0, "y": 5 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "df6gucjnmg1z4a"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 15,
+        "x": 9,
+        "y": 1
+      },
       "targets": [
-        { "expr": "increase(python_feed_ws_reconnects_total[5m])", "legendFormat": "reconnects" },
-        { "expr": "increase(python_feed_errors_total[5m])", "legendFormat": "errors" }
+        {
+          "expr": "increase(python_feed_ws_reconnects_total[5m])",
+          "legendFormat": "reconnects",
+          "refId": "A"
+        },
+        {
+          "expr": "increase(python_feed_errors_total[5m])",
+          "legendFormat": "errors",
+          "refId": "B"
+        }
       ]
     },
-
+    {
+      "type": "stat",
+      "title": "Tick Counters (Total)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "df6gucjnmg1z4a"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 3,
+        "x": 6,
+        "y": 1
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "df6gucjnmg1z4a"
+          },
+          "editorMode": "code",
+          "expr": "sum(python_feed_ticks_duplicates_dropped_total) or vector(0)",
+          "legendFormat": "Duplicate Deleted",
+          "range": true,
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "df6gucjnmg1z4a"
+          },
+          "editorMode": "code",
+          "expr": "sum(python_feed_ticks_received_by_client_total) or vector(0)",
+          "legendFormat": "Total Received",
+          "range": true,
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "df6gucjnmg1z4a"
+          },
+          "editorMode": "code",
+          "expr": "sum(python_feed_ticks_published_by_client_total) or vector(0)",
+          "legendFormat": "Total Inserted Kafka",
+          "range": true,
+          "refId": "C"
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "values": false,
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": ""
+        },
+        "orientation": "vertical",
+        "textMode": "value_and_name",
+        "wideLayout": false,
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "showPercentChange": false
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Connect/Disconnect Count by Client (Total)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "df6gucjnmg1z4a"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 12,
+        "x": 12,
+        "y": 5
+      },
+      "targets": [
+        {
+          "expr": "python_feed_ws_client_connects_total",
+          "legendFormat": "{{client}} connect",
+          "refId": "A"
+        },
+        {
+          "expr": "python_feed_ws_client_disconnects_total",
+          "legendFormat": "{{client}} {{reason}} disconnect",
+          "refId": "B"
+        }
+      ]
+    },
+    {
+      "type": "gauge",
+      "title": "Active WS Clients",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "df6gucjnmg1z4a"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 3,
+        "x": 0,
+        "y": 1
+      },
+      "targets": [
+        {
+          "expr": "python_feed_ws_clients_active",
+          "legendFormat": "",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "WS Client Connected State (0/1)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "df6gucjnmg1z4a"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 8,
+        "x": 0,
+        "y": 11
+      },
+      "targets": [
+        {
+          "expr": "python_feed_ws_client_connected",
+          "legendFormat": "{{client}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "No-Tick Relogin Count by Client (Total)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "df6gucjnmg1z4a"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 4,
+        "x": 8,
+        "y": 11
+      },
+      "targets": [
+        {
+          "expr": "python_feed_ws_client_no_tick_relogin_total",
+          "legendFormat": "{{client}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Last Disconnect/Reconnect/NoTick Relogin Time (Unix)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "df6gucjnmg1z4a"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 12,
+        "x": 12,
+        "y": 11
+      },
+      "targets": [
+        {
+          "expr": "python_feed_ws_client_last_disconnect_unixtime",
+          "legendFormat": "{{client}} last_disconnect",
+          "refId": "A"
+        },
+        {
+          "expr": "python_feed_ws_client_last_connect_unixtime",
+          "legendFormat": "{{client}} last_connect",
+          "refId": "B"
+        },
+        {
+          "expr": "python_feed_ws_client_last_no_tick_relogin_unixtime",
+          "legendFormat": "{{client}} last_no_tick_relogin",
+          "refId": "C"
+        }
+      ]
+    },
     {
       "type": "row",
       "title": "marketdata",
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 11 }
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 17
+      }
     },
     {
       "type": "gauge",
       "title": "Kafka In Connected",
-      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 12 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "df6gucjnmg1z4a"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 0,
+        "y": 18
+      },
       "targets": [
-        { "expr": "marketdata_kafka_in_connected", "legendFormat": "" }
+        {
+          "expr": "marketdata_kafka_in_connected",
+          "legendFormat": "",
+          "refId": "A"
+        }
       ],
-      "options": { "reduceOptions": { "calcs": ["lastNotNull"] } }
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      }
     },
     {
       "type": "gauge",
       "title": "Kafka Out Connected",
-      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 12 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "df6gucjnmg1z4a"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 6,
+        "y": 18
+      },
       "targets": [
-        { "expr": "marketdata_kafka_out_connected", "legendFormat": "" }
+        {
+          "expr": "marketdata_kafka_out_connected",
+          "legendFormat": "",
+          "refId": "A"
+        }
       ],
-      "options": { "reduceOptions": { "calcs": ["lastNotNull"] } }
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      }
     },
     {
       "type": "timeseries",
       "title": "Ticks Consumed/s",
-      "gridPos": { "h": 6, "w": 12, "x": 12, "y": 12 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "df6gucjnmg1z4a"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 12,
+        "x": 12,
+        "y": 18
+      },
       "targets": [
-        { "expr": "rate(marketdata_ticks_consumed_total[5m])", "legendFormat": "ticks/s" }
+        {
+          "expr": "rate(marketdata_ticks_consumed_total[5m])",
+          "legendFormat": "ticks/s",
+          "refId": "A"
+        }
       ]
     },
     {
       "type": "timeseries",
       "title": "Candles Emitted/s",
-      "gridPos": { "h": 6, "w": 12, "x": 0, "y": 16 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "df6gucjnmg1z4a"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 12,
+        "x": 0,
+        "y": 22
+      },
       "targets": [
-        { "expr": "rate(marketdata_candles_emitted_total[5m])", "legendFormat": "candles/s" }
+        {
+          "expr": "rate(marketdata_candles_emitted_total[5m])",
+          "legendFormat": "candles/s",
+          "refId": "A"
+        }
       ]
     },
     {
       "type": "timeseries",
       "title": "Errors",
-      "gridPos": { "h": 6, "w": 12, "x": 12, "y": 16 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "df6gucjnmg1z4a"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 12,
+        "x": 12,
+        "y": 22
+      },
       "targets": [
-        { "expr": "increase(marketdata_errors_total[5m])", "legendFormat": "errors" }
+        {
+          "expr": "increase(marketdata_errors_total[5m])",
+          "legendFormat": "errors",
+          "refId": "A"
+        }
       ]
     },
-
     {
       "type": "row",
       "title": "vwap_strategy",
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 22 }
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 28
+      }
     },
     {
       "type": "gauge",
       "title": "Service Up",
-      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 23 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "df6gucjnmg1z4a"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 0,
+        "y": 29
+      },
       "targets": [
-        { "expr": "vwap_strategy_up", "legendFormat": "" }
+        {
+          "expr": "vwap_strategy_up",
+          "legendFormat": "",
+          "refId": "A"
+        }
       ],
-      "options": { "reduceOptions": { "calcs": ["lastNotNull"] } }
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      }
     },
     {
       "type": "timeseries",
       "title": "Candles Consumed/s",
-      "gridPos": { "h": 6, "w": 12, "x": 6, "y": 23 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "df6gucjnmg1z4a"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 12,
+        "x": 6,
+        "y": 29
+      },
       "targets": [
-        { "expr": "rate(vwap_strategy_candles_consumed_total[5m])", "legendFormat": "candles/s" }
+        {
+          "expr": "rate(vwap_strategy_candles_consumed_total[5m])",
+          "legendFormat": "candles/s",
+          "refId": "A"
+        }
       ]
     },
     {
       "type": "timeseries",
       "title": "Signals Emitted/s",
-      "gridPos": { "h": 6, "w": 12, "x": 18, "y": 23 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "df6gucjnmg1z4a"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 12,
+        "x": 18,
+        "y": 29
+      },
       "targets": [
-        { "expr": "rate(vwap_strategy_signals_emitted_total[5m])", "legendFormat": "signals/s" }
+        {
+          "expr": "rate(vwap_strategy_signals_emitted_total[5m])",
+          "legendFormat": "signals/s",
+          "refId": "A"
+        }
       ]
     },
     {
       "type": "timeseries",
       "title": "Errors",
-      "gridPos": { "h": 6, "w": 12, "x": 0, "y": 29 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "df6gucjnmg1z4a"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 12,
+        "x": 0,
+        "y": 35
+      },
       "targets": [
-        { "expr": "increase(vwap_strategy_errors_total[5m])", "legendFormat": "errors" }
+        {
+          "expr": "increase(vwap_strategy_errors_total[5m])",
+          "legendFormat": "errors",
+          "refId": "A"
+        }
       ]
     },
-
     {
       "type": "row",
       "title": "paper_engine",
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 35 }
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 54
+      }
+    },
+    {
+      "type": "row",
+      "title": "first_candle_strategy",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 41
+      }
+    },
+    {
+      "type": "gauge",
+      "title": "Service Up",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "df6gucjnmg1z4a"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 0,
+        "y": 42
+      },
+      "targets": [
+        {
+          "expr": "first_candle_strategy_up",
+          "legendFormat": "",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Candles Consumed/s",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "df6gucjnmg1z4a"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 9,
+        "x": 6,
+        "y": 42
+      },
+      "targets": [
+        {
+          "expr": "rate(first_candle_strategy_candles_consumed_total[5m])",
+          "legendFormat": "candles/s",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Signals Emitted/s",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "df6gucjnmg1z4a"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 9,
+        "x": 15,
+        "y": 42
+      },
+      "targets": [
+        {
+          "expr": "rate(first_candle_strategy_signals_emitted_total[5m])",
+          "legendFormat": "signals/s",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Errors",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "df6gucjnmg1z4a"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 12,
+        "x": 0,
+        "y": 48
+      },
+      "targets": [
+        {
+          "expr": "increase(first_candle_strategy_errors_total[5m])",
+          "legendFormat": "errors",
+          "refId": "A"
+        }
+      ]
     },
     {
       "type": "gauge",
       "title": "Trading Halted",
-      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 36 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "df6gucjnmg1z4a"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 0,
+        "y": 55
+      },
       "targets": [
-        { "expr": "paper_engine_trading_halted", "legendFormat": "" }
+        {
+          "expr": "paper_engine_trading_halted",
+          "legendFormat": "",
+          "refId": "A"
+        }
       ],
-      "options": { "reduceOptions": { "calcs": ["lastNotNull"] } }
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      }
     },
     {
       "type": "timeseries",
       "title": "Signals Consumed/s",
-      "gridPos": { "h": 6, "w": 12, "x": 6, "y": 36 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "df6gucjnmg1z4a"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 12,
+        "x": 6,
+        "y": 55
+      },
       "targets": [
-        { "expr": "rate(paper_engine_signals_consumed_total[5m])", "legendFormat": "signals/s" }
+        {
+          "expr": "rate(paper_engine_signals_consumed_total[5m])",
+          "legendFormat": "signals/s",
+          "refId": "A"
+        }
       ]
     },
     {
       "type": "timeseries",
       "title": "Trades Emitted/s",
-      "gridPos": { "h": 6, "w": 12, "x": 18, "y": 36 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "df6gucjnmg1z4a"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 12,
+        "x": 18,
+        "y": 55
+      },
       "targets": [
-        { "expr": "rate(paper_engine_trades_emitted_total[5m])", "legendFormat": "trades/s" }
+        {
+          "expr": "rate(paper_engine_trades_emitted_total[5m])",
+          "legendFormat": "trades/s",
+          "refId": "A"
+        }
       ]
     },
     {
       "type": "timeseries",
       "title": "PnL Snapshots/s",
-      "gridPos": { "h": 6, "w": 12, "x": 0, "y": 42 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "df6gucjnmg1z4a"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 12,
+        "x": 0,
+        "y": 61
+      },
       "targets": [
-        { "expr": "rate(paper_engine_pnl_snapshots_total[5m])", "legendFormat": "snapshots/s" }
+        {
+          "expr": "rate(paper_engine_pnl_snapshots_total[5m])",
+          "legendFormat": "snapshots/s",
+          "refId": "A"
+        }
       ]
     },
     {
       "type": "timeseries",
       "title": "Errors",
-      "gridPos": { "h": 6, "w": 12, "x": 12, "y": 42 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "df6gucjnmg1z4a"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 12,
+        "x": 12,
+        "y": 61
+      },
       "targets": [
-        { "expr": "increase(paper_engine_errors_total[5m])", "legendFormat": "errors" }
+        {
+          "expr": "increase(paper_engine_errors_total[5m])",
+          "legendFormat": "errors",
+          "refId": "A"
+        }
       ]
+    },
+    {
+      "type": "row",
+      "title": "ldrb_strategy",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 67
+      }
+    },
+    {
+      "type": "gauge",
+      "title": "Service Up",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "df6gucjnmg1z4a"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 0,
+        "y": 68
+      },
+      "targets": [
+        {
+          "expr": "ldrb_strategy_up",
+          "legendFormat": "",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Candles Consumed/s",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "df6gucjnmg1z4a"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 9,
+        "x": 6,
+        "y": 68
+      },
+      "targets": [
+        {
+          "expr": "rate(ldrb_strategy_candles_consumed_total[5m])",
+          "legendFormat": "candles/s",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Signals Emitted/s",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "df6gucjnmg1z4a"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 9,
+        "x": 15,
+        "y": 68
+      },
+      "targets": [
+        {
+          "expr": "rate(ldrb_strategy_signals_emitted_total[5m])",
+          "legendFormat": "signals/s",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Errors",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "df6gucjnmg1z4a"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 12,
+        "x": 0,
+        "y": 74
+      },
+      "targets": [
+        {
+          "expr": "increase(ldrb_strategy_errors_total[5m])",
+          "legendFormat": "errors",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 1,
+      "title": "Tick Received by Clients",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "df6gucjnmg1z4a"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "barAlignment": 0,
+            "lineWidth": 1,
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "spanNulls": false,
+            "insertNulls": false,
+            "showPoints": "auto",
+            "pointSize": 5,
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            },
+            "axisPlacement": "auto",
+            "axisLabel": "",
+            "axisColorMode": "text",
+            "axisBorderShow": false,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "axisCenteredZero": false,
+            "hideFrom": {
+              "tooltip": false,
+              "viz": false,
+              "legend": false
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        },
+        "legend": {
+          "showLegend": true,
+          "displayMode": "list",
+          "placement": "bottom",
+          "calcs": []
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "df6gucjnmg1z4a"
+          },
+          "editorMode": "code",
+          "expr": "python_feed_ticks_received_by_client_total",
+          "legendFormat": "{{client}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "gridPos": {
+        "h": 6,
+        "w": 12,
+        "x": 0,
+        "y": 5
+      }
     }
   ],
   "refresh": "30s",
   "schemaVersion": 38,
   "style": "dark",
-  "tags": ["trading", "services", "prometheus"],
-  "templating": { "list": [] },
-  "time": { "from": "now-1h", "to": "now" },
+  "tags": [
+    "trading",
+    "services",
+    "prometheus"
+  ],
+  "templating": {
+    "list": []
+  },
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
   "timezone": "",
   "title": "Trading Services Status",
-  "uid": null,
-  "version": 1,
+  "uid": "adf9v9j",
+  "version": 11,
   "weekStart": ""
 }

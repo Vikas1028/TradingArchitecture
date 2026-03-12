@@ -1,0 +1,9 @@
+flowchart LR
+    A["Kafka indices.1m"] --> B["Index bias engine"]
+    C["Kafka candles.1m"] --> D["VWAP pullback strategy"]
+    B --> D
+    D --> E{"Signal conditions met?"}
+    E -->|Yes| F["Publish signals.vwap"]
+    E -->|No| G["Wait for next candle"]
+    D --> H["Entry window + trend/pullback filters"]
+    D --> I["Prometheus metrics<br/>port 9101"]

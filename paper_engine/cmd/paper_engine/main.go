@@ -48,6 +48,8 @@ func run(configPath string) error {
 		zap.String("env", cfg.Env),
 		zap.String("bootstrap", cfg.Kafka.BootstrapServers),
 		zap.String("group", cfg.Kafka.GroupID),
+		zap.String("signals_group", cfg.Kafka.SignalsGroupID),
+		zap.String("candles_group", cfg.Kafka.CandlesGroupID),
 		zap.String("signals_topic", cfg.Kafka.SignalsTopic),
 		zap.String("candles_topic", cfg.Kafka.CandlesTopic),
 		zap.String("trades_topic", cfg.Kafka.TradesTopic),
@@ -87,6 +89,9 @@ func run(configPath string) error {
 	if err != nil {
 		return err
 	}
+	candleMinuteForSignal := func(sigTime time.Time) time.Time {
+		return sigTime.In(loc).Truncate(time.Minute)
+	}
 	state := engine.NewEngineState(cfg.Risk, cfg.Trading, loc, logger)
 	core, err := engine.NewEngine(state, logger)
 	if err != nil {
@@ -97,6 +102,11 @@ func run(configPath string) error {
 	defer commitTicker.Stop()
 	pnlTicker := time.NewTicker(time.Duration(cfg.Trading.MtmSnapshotIntervalSec) * time.Second)
 	defer pnlTicker.Stop()
+	pendingExpiryCheckTicker := time.NewTicker(1 * time.Second)
+	defer pendingExpiryCheckTicker.Stop()
+
+	const pollTimeout = 200 * time.Millisecond
+	pendingSignalMaxAge := time.Duration(cfg.Trading.PendingSignalMaxAgeSec) * time.Second
 
 	for {
 		select {
@@ -114,14 +124,33 @@ func run(configPath string) error {
 			} else {
 				metrics.PnlSnapshotsTotal.Inc()
 			}
+		case <-pendingExpiryCheckTicker.C:
+			expired := core.DrainExpiredPendingSignals(time.Now().In(loc), pendingSignalMaxAge)
+			for _, pending := range expired {
+				logger.Warn("expired pending signal without pricing candle",
+					zap.String("symbol", pending.Signal.Symbol),
+					zap.Time("signal_time", pending.Signal.Time.In(loc)),
+					zap.Time("queued_at", pending.QueuedAt.In(loc)),
+					zap.Int("max_age_sec", cfg.Trading.PendingSignalMaxAgeSec),
+				)
+			}
 		default:
-			if sig, err := signalsConsumer.Poll(ctx); err != nil {
+			sigPollCtx, sigPollCancel := context.WithTimeout(ctx, pollTimeout)
+			sig, err := signalsConsumer.Poll(sigPollCtx)
+			sigPollCancel()
+			if err != nil {
 				logger.Error("signals poll error", zap.Error(err))
 				metrics.ErrorsTotal.Inc()
 			} else if sig != nil {
 				metrics.SignalsConsumedTotal.Inc()
 				latest := core.GetLatestCandleForSymbol(sig.Symbol)
-				if trade, err := core.OnSignal(*sig, latest); err != nil {
+				if latest == nil || latest.Time.In(loc).Before(candleMinuteForSignal(sig.Time)) {
+					core.QueueSignal(*sig, time.Now().In(loc))
+					logger.Debug("queued signal until pricing candle is available",
+						zap.String("symbol", sig.Symbol),
+						zap.Time("signal_time", sig.Time.In(loc)),
+					)
+				} else if trade, err := core.OnSignal(*sig, latest); err != nil {
 					logger.Error("OnSignal error", zap.Error(err), zap.String("symbol", sig.Symbol))
 					metrics.ErrorsTotal.Inc()
 				} else if trade != nil {
@@ -133,7 +162,10 @@ func run(configPath string) error {
 				}
 			}
 
-			if candle, err := candlesConsumer.Poll(ctx); err != nil {
+			candlePollCtx, candlePollCancel := context.WithTimeout(ctx, pollTimeout)
+			candle, err := candlesConsumer.Poll(candlePollCtx)
+			candlePollCancel()
+			if err != nil {
 				logger.Error("candles poll error", zap.Error(err))
 				metrics.ErrorsTotal.Inc()
 			} else if candle != nil {
@@ -150,18 +182,34 @@ func run(configPath string) error {
 						metrics.TradesEmittedTotal.Inc()
 					}
 				}
+				if pending := core.ConsumePendingSignal(candle.Symbol); pending != nil {
+					latest := core.GetLatestCandleForSymbol(pending.Symbol)
+					if trade, err := core.OnSignal(*pending, latest); err != nil {
+						logger.Error("pending OnSignal error", zap.Error(err), zap.String("symbol", pending.Symbol))
+						metrics.ErrorsTotal.Inc()
+					} else if trade != nil {
+						if err := producer.PublishTrade(ctx, *trade); err != nil {
+							metrics.ErrorsTotal.Inc()
+						} else {
+							metrics.TradesEmittedTotal.Inc()
+							logger.Info("executed queued signal", zap.String("symbol", trade.Symbol))
+						}
+					}
+				}
 			}
 		}
 	}
 
 shutdown:
 	snap := core.BuildPnlSnapshot(time.Now().In(loc))
-	if err := producer.PublishPnlSnapshot(context.Background(), snap); err != nil {
+	publishCtx, cancelPublish := context.WithTimeout(context.Background(), 5*time.Second)
+	if err := producer.PublishPnlSnapshot(publishCtx, snap); err != nil {
 		logger.Warn("failed to publish final pnl snapshot", zap.Error(err))
 		metrics.ErrorsTotal.Inc()
 	} else {
 		metrics.PnlSnapshotsTotal.Inc()
 	}
+	cancelPublish()
 	if err := producer.Flush(5 * time.Second); err != nil {
 		logger.Warn("producer flush failed", zap.Error(err))
 	}

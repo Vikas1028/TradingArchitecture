@@ -1,0 +1,13 @@
+{
+  "kafka": {
+    "bootstrap_servers": "localhost:9092",
+    "topic": "ticks.raw",
+    "group_id": "tick-audit-service"
+  },
+  "app": {
+    "timezone": "Asia/Kolkata",
+    "output_dir": "/Users/vikasbhandekar/Desktop/TradingArchitecture/logs/tick_audit",
+    "poll_timeout_ms": 1000,
+    "max_idle_polls": 20
+  }
+}

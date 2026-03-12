@@ -3,11 +3,14 @@
   "kafka": {
     "bootstrap_servers": "localhost:9092",
     "group_id": "paper-engine",
-    "signals_topic": "signals.vwap",
+    "signals_group_id": "paper-engine-signals",
+    "candles_group_id": "paper-engine-candles",
+    "signals_topic": "signals.strategy",
     "candles_topic": "candles.1m",
     "trades_topic": "trades.paper",
     "pnl_topic": "pnl.paper",
-    "commit_interval_ms": 1000
+    "commit_interval_ms": 1000,
+    "startup_replay_grace_sec": -1
   },
   "log": {
     "level": "DEBUG",
@@ -15,10 +18,11 @@
   },
   "trading": {
     "timezone": "Asia/Kolkata",
-    "entry_start": "09:20",
+    "entry_start": "09:15",
     "entry_end": "15:15",
     "eod_flat_time": "15:20",
-    "mtm_snapshot_interval_sec": 60
+    "mtm_snapshot_interval_sec": 60,
+    "pending_signal_max_age_sec": 180
   },
   "risk": {
     "capital_per_trade": 10000.0,

@@ -22,9 +22,10 @@ type PolledCandle struct {
 // CandleConsumer wraps a Kafka consumer that reads Candle messages from index and stock topics.
 // Inputs: KafkaConfig, logger; Outputs: PolledCandle via Poll.
 type CandleConsumer struct {
-	reader  *kafka.Reader
-	logger  *zap.Logger
-	lastMsg *kafka.Message
+	reader        *kafka.Reader
+	logger        *zap.Logger
+	lastMsg       *kafka.Message
+	startupCutoff time.Time
 }
 
 // NewCandleConsumer creates and subscribes a consumer to both stock and index candle topics.
@@ -37,11 +38,17 @@ func NewCandleConsumer(cfg cfgpkg.KafkaConfig, logger *zap.Logger) (*CandleConsu
 		GroupTopics:    []string{cfg.StockCandlesTopic, cfg.IndexCandlesTopic},
 		MinBytes:       1,
 		MaxBytes:       10e6,
+		StartOffset:    kafka.LastOffset,
 		CommitInterval: 0, // manual commits
 	})
+	startupCutoff := time.Time{}
+	if cfg.StartupReplayGraceSec > 0 {
+		startupCutoff = time.Now().Add(-time.Duration(cfg.StartupReplayGraceSec) * time.Second)
+	}
 	return &CandleConsumer{
-		reader: reader,
-		logger: logger,
+		reader:        reader,
+		logger:        logger,
+		startupCutoff: startupCutoff,
 	}, nil
 }
 
@@ -90,6 +97,16 @@ func (c *CandleConsumer) Poll(ctx context.Context) (*PolledCandle, error) {
 		Close:  raw.Close,
 		Volume: raw.Volume,
 		VWAP:   raw.VWAP,
+	}
+	if !c.startupCutoff.IsZero() && parsedTime.Before(c.startupCutoff) {
+		c.logger.Debug("skipping stale candle from startup backlog",
+			zap.String("symbol", candle.Symbol),
+			zap.String("topic", msg.Topic),
+			zap.Time("candle_time", parsedTime),
+			zap.Time("startup_cutoff", c.startupCutoff),
+		)
+		_ = c.Commit()
+		return nil, nil
 	}
 
 	return &PolledCandle{

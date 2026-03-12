@@ -1,0 +1,23 @@
+# OS
+.DS_Store
+
+# Dependencies
+node_modules/
+
+# Runtime logs and local artifacts
+logs/**
+!logs/.gitkeep
+*.log
+
+# Local compiled binaries
+first_candle_strategy/first_candle_strategy
+ldrb_strategy/first_candle_strategy
+ldrb_strategy/ldrb_strategy
+marketdata/marketdata
+paper_engine/paper_engine
+paper_engine/cmd/paper_engine/paper_engine
+vwap_strategy/vwap_strategy
+uat-release/first_candle_strategy/cmd/first_candle_strategy
+uat-release/marketdata/cmd/marketdata
+uat-release/paper_engine/cmd/paper_engine
+uat-release/vwap_strategy/cmd/vwap_strategy

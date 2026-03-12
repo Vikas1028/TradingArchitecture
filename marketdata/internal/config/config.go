@@ -11,12 +11,13 @@ import (
 // KafkaConfig holds Kafka-related settings for the service.
 // Fields configure bootstrap, group, topics, and commit interval.
 type KafkaConfig struct {
-	BootstrapServers  string `json:"bootstrap_servers"`
-	GroupID           string `json:"group_id"`
-	TicksTopic        string `json:"ticks_topic"`
-	StockCandlesTopic string `json:"stock_candles_topic"`
-	IndexCandlesTopic string `json:"index_candles_topic"`
-	CommitIntervalMs  int    `json:"commit_interval_ms"`
+	BootstrapServers      string `json:"bootstrap_servers"`
+	GroupID               string `json:"group_id"`
+	TicksTopic            string `json:"ticks_topic"`
+	StockCandlesTopic     string `json:"stock_candles_topic"`
+	IndexCandlesTopic     string `json:"index_candles_topic"`
+	CommitIntervalMs      int    `json:"commit_interval_ms"`
+	StartupReplayGraceSec int    `json:"startup_replay_grace_sec"`
 }
 
 // SymbolsConfig describes classification of symbols (which ones are indices).
@@ -89,6 +90,9 @@ func applyDefaults(cfg *AppConfig) {
 	if cfg.Kafka.CommitIntervalMs == 0 {
 		cfg.Kafka.CommitIntervalMs = 1000
 	}
+	if cfg.Kafka.StartupReplayGraceSec == 0 {
+		cfg.Kafka.StartupReplayGraceSec = 120
+	}
 	if cfg.Aggregation.Timezone == "" {
 		cfg.Aggregation.Timezone = "Asia/Kolkata"
 	}
@@ -107,6 +111,9 @@ func validate(cfg *AppConfig) error {
 	}
 	if strings.TrimSpace(cfg.Kafka.GroupID) == "" {
 		missing = append(missing, "kafka.group_id")
+	}
+	if cfg.Kafka.StartupReplayGraceSec < 0 {
+		missing = append(missing, "kafka.startup_replay_grace_sec(>=0)")
 	}
 	if strings.TrimSpace(cfg.Log.File) == "" {
 		missing = append(missing, "log.file")

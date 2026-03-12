@@ -16,9 +16,10 @@ import (
 // SignalsConsumer wraps a Kafka consumer that reads StrategySignal messages.
 // Inputs: KafkaConfig, logger; Outputs: StrategySignal via Poll.
 type SignalsConsumer struct {
-	reader  *kafka.Reader
-	logger  *zap.Logger
-	lastMsg *kafka.Message
+	reader        *kafka.Reader
+	logger        *zap.Logger
+	lastMsg       *kafka.Message
+	startupCutoff time.Time
 }
 
 // NewSignalsConsumer creates a Kafka consumer subscribed to cfg.SignalsTopic.
@@ -27,15 +28,21 @@ type SignalsConsumer struct {
 func NewSignalsConsumer(cfg cfgpkg.KafkaConfig, logger *zap.Logger) (*SignalsConsumer, error) {
 	reader := kafka.NewReader(kafka.ReaderConfig{
 		Brokers:        []string{cfg.BootstrapServers},
-		GroupID:        cfg.GroupID,
+		GroupID:        cfg.SignalsGroupID,
 		GroupTopics:    []string{cfg.SignalsTopic},
 		MinBytes:       1,
 		MaxBytes:       10e6,
+		StartOffset:    kafka.LastOffset,
 		CommitInterval: 0,
 	})
+	startupCutoff := time.Time{}
+	if cfg.StartupReplayGraceSec > 0 {
+		startupCutoff = time.Now().Add(-time.Duration(cfg.StartupReplayGraceSec) * time.Second)
+	}
 	return &SignalsConsumer{
-		reader: reader,
-		logger: logger,
+		reader:        reader,
+		logger:        logger,
+		startupCutoff: startupCutoff,
 	}, nil
 }
 
@@ -77,6 +84,15 @@ func (c *SignalsConsumer) Poll(ctx context.Context) (*engine.StrategySignal, err
 		Side:     engine.SignalSide(raw.Side),
 		Time:     parsedTime,
 		Reason:   raw.Reason,
+	}
+	if !c.startupCutoff.IsZero() && parsedTime.Before(c.startupCutoff) {
+		c.logger.Debug("skipping stale signal from startup backlog",
+			zap.String("symbol", sig.Symbol),
+			zap.Time("signal_time", parsedTime),
+			zap.Time("startup_cutoff", c.startupCutoff),
+		)
+		_ = c.Commit()
+		return nil, nil
 	}
 	return &sig, nil
 }

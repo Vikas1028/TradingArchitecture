@@ -1,0 +1,51 @@
+{
+  "_comment": "Configuration for Angel SmartAPI websocket -> Kafka tick forwarder. Update credentials, Kafka brokers, and symbol lists for your environment.",
+  "env": "prod",
+  "angel_comment": "Angel API credentials and tokens. feed_token can mirror refresh_token if dedicated feed token is not issued.",
+  "angel": {
+    "api_key": "DLn0CV95",
+    "client_id": "V314929",
+    "password": "2810",
+    "totp_secret": "EBEQHKQ6SC6ZQ6T4T4NSFD3UMU",
+    "refresh_token": "",
+    "feed_token": "",
+    "debug": false
+  },
+  "kafka_comment": "Kafka connection settings for publishing normalized ticks to topic ticks.raw.",
+  "kafka": {
+    "bootstrap_servers": "localhost:9092",
+    "topic": "ticks.raw",
+    "acks": "1",
+    "linger_ms": 5,
+    "batch_size": 32768
+  },
+  "symbols_comment": "Symbols to subscribe: indices and equities. Format: EXCHANGE:SYMBOL-SUFFIX.",
+  "symbols": {
+    "indices": [
+      {
+        "instrument": "NSE:NIFTY50-INDEX",
+        "token": "99926000"
+      },
+      {
+        "instrument": "NSE:NIFTYBANK-INDEX",
+        "token": "99926009"
+      }
+    ],
+    "equities_csv": "/Users/vikasbhandekar/live_services/python_feed_triplex/config/nifty500.csv"
+  },
+  "log_comment": "Logging configuration: level and output file path.",
+  "log": {
+    "level": "INFO",
+    "file": "logs/app.log"
+  },
+  "metrics": {
+    "port": 9000
+  },
+  "reconnect_comment": "Reconnect behavior: 3 fixed clients, per-client no-tick relogin+recreate, and duplicate-drop TTL.",
+  "reconnect": {
+    "backoff_seconds": 5,
+    "no_ticks_relogin_sec": 10,
+    "dedupe_ttl_sec": 10,
+    "manager_monitor_interval_sec": 1
+  }
+}

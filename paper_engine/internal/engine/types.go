@@ -19,6 +19,12 @@ type StrategySignal struct {
 	Reason   string     `json:"reason"`
 }
 
+// PendingSignal tracks a queued signal waiting for a usable pricing candle.
+type PendingSignal struct {
+	Signal   StrategySignal `json:"signal"`
+	QueuedAt time.Time      `json:"queued_at"`
+}
+
 // Candle represents a 1-minute OHLCV bar used for paper execution and MTM.
 type Candle struct {
 	Symbol string    `json:"symbol"`

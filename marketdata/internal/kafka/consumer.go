@@ -19,9 +19,10 @@ import (
 // Inputs: KafkaConfig and logger; Outputs: parsed Tick instances via Poll.
 // Flow: builds a kafka-go reader with manual commits; Poll returns a Tick or nil on timeout.
 type TickConsumer struct {
-	reader  *kafka.Reader
-	logger  *zap.Logger
-	lastMsg *kafka.Message
+	reader        *kafka.Reader
+	logger        *zap.Logger
+	lastMsg       *kafka.Message
+	startupCutoff time.Time
 }
 
 // NewTickConsumer constructs a Kafka consumer subscribed to cfg.TicksTopic using cfg.GroupID.
@@ -35,12 +36,19 @@ func NewTickConsumer(cfg config.KafkaConfig, logger *zap.Logger) (*TickConsumer,
 		Topic:          cfg.TicksTopic,
 		MinBytes:       1,
 		MaxBytes:       10e6,
+		StartOffset:    kafka.LastOffset,
 		CommitInterval: 0, // manual commits
 	})
 
+	startupCutoff := time.Time{}
+	if cfg.StartupReplayGraceSec > 0 {
+		startupCutoff = time.Now().Add(-time.Duration(cfg.StartupReplayGraceSec) * time.Second)
+	}
+
 	tc := &TickConsumer{
-		reader: reader,
-		logger: logger,
+		reader:        reader,
+		logger:        logger,
+		startupCutoff: startupCutoff,
 	}
 	metrics.KafkaInConnected.Set(1)
 	return tc, nil
@@ -92,6 +100,15 @@ func (c *TickConsumer) Poll(ctx context.Context) (*candle.Tick, error) {
 		Volume:   raw.Volume,
 		Bid:      raw.Bid,
 		Ask:      raw.Ask,
+	}
+	if !c.startupCutoff.IsZero() && parsedTime.Before(c.startupCutoff) {
+		c.logger.Debug("skipping stale tick from startup backlog",
+			zap.String("symbol", tick.Symbol),
+			zap.Time("tick_time", parsedTime),
+			zap.Time("startup_cutoff", c.startupCutoff),
+		)
+		_ = c.Commit()
+		return nil, nil
 	}
 
 	return &tick, nil

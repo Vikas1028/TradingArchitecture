@@ -34,8 +34,7 @@ def load_config(path: str | Path = DEFAULT_CONFIG_PATH) -> Dict[str, Any]:
     cfg.setdefault("symbols", {"indices": [], "equities": []})
     cfg.setdefault("token_map", {})
     cfg.setdefault("log", {"level": "INFO", "file": "logs/app.log"})
-    cfg.setdefault("reconnect", {"max_retries": 0, "backoff_seconds": 5})
-    cfg.setdefault("health", {"print_stats_interval_sec": 60})
+    cfg.setdefault("reconnect", {"backoff_seconds": 5})
 
     required: List[Tuple[str, str]] = [
         ("angel", "api_key"),
@@ -60,9 +59,14 @@ def load_config(path: str | Path = DEFAULT_CONFIG_PATH) -> Dict[str, Any]:
         ("kafka", "batch_size"): 32768,
         ("log", "level"): "INFO",
         ("log", "file"): "logs/app.log",
-        ("reconnect", "max_retries"): 0,
         ("reconnect", "backoff_seconds"): 5,
-        ("health", "print_stats_interval_sec"): 60,
+        ("reconnect", "stale_connection_sec"): 20,
+        ("reconnect", "stale_connection_warmup_sec"): 120,
+        ("reconnect", "rescue_stabilize_sec"): 20,
+        ("reconnect", "global_stall_recover_sec"): 90,
+        ("reconnect", "failover_cooldown_sec"): 60,
+        ("reconnect", "dedupe_ttl_sec"): 10,
+        ("reconnect", "manager_monitor_interval_sec"): 1,
     }
     for (section, key), default in optional_defaults.items():
         section_dict = cfg.setdefault(section, {})

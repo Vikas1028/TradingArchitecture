@@ -1,0 +1,18 @@
+flowchart LR
+    A["Angel SmartAPI WebSocket<br/>python_feed"] -->|normalized ticks<br/>Kafka: ticks.raw| B["Market Data Aggregator<br/>marketdata"]
+    B -->|stock candles<br/>Kafka: candles.1m| C["VWAP Signal Engine<br/>vwap_strategy"]
+    B -->|index candles<br/>Kafka: indices.1m| C
+    C -->|trade signals<br/>Kafka: signals.vwap| D["Paper Trading Engine<br/>paper_engine"]
+    B -->|latest candles| D
+    D -->|paper trades<br/>Kafka: trades.paper| E["Trade Stream"]
+    D -->|PnL snapshots<br/>Kafka: pnl.paper| F["PnL Stream"]
+
+    G["Prometheus / Monitoring"] -.metrics.-> A
+    G -.metrics.-> B
+    G -.metrics.-> C
+    G -.metrics.-> D
+
+    H["Operations Scripts<br/>shellscripts"] -.start / stop / deploy / archive logs.-> A
+    H -.start / stop / deploy / archive logs.-> B
+    H -.start / stop / deploy / archive logs.-> C
+    H -.start / stop / deploy / archive logs.-> D

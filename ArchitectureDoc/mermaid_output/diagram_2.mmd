@@ -1,0 +1,9 @@
+flowchart LR
+    A["Angel SmartAPI credentials<br/>and symbol config"] --> B["python_feed"]
+    B --> C["Build token map"]
+    C --> D["Open WebSocket session"]
+    D --> E["Receive live ticks"]
+    E --> F["Normalize symbol / exchange / payload"]
+    F --> G["Publish to Kafka<br/>ticks.raw"]
+    E --> H["Health monitor + reconnect loop"]
+    B --> I["Prometheus metrics<br/>port 9000"]

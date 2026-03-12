@@ -1,0 +1,22 @@
+flowchart LR
+    A["Kafka ticks.raw<br/>from python_feed"] --> B["marketdata"]
+    B --> C["Kafka candles.1m<br/>1-minute stock candles"]
+    C --> D["first_candle_strategy"]
+
+    D --> E["Track per-symbol intraday state"]
+    E --> F["Select configured opening slot<br/>15m block: 1 / 2 / 3"]
+    F --> G["Use first 1m candle open<br/>as anchor price"]
+    G --> H["Watch first move<br/>away by threshold %"]
+    H --> I{"First move direction"}
+    I -->|Down first| J["Wait for later 1m candle<br/>to return to opening price"]
+    I -->|Up first| K["Ignore for long-only<br/>no signal emitted"]
+    J --> L{"Return to open<br/>inside same 15m window?"}
+    L -->|Yes| M["Publish BUY signal<br/>Kafka: signals.strategy"]
+    L -->|No| N["Close evaluation for slot"]
+
+    M --> O["paper_engine"]
+    C --> O
+    O --> P["Paper trade generation only<br/>no broker order placed"]
+    P --> Q["Kafka: trades.paper"]
+
+    D --> R["Prometheus metrics<br/>port 9103"]

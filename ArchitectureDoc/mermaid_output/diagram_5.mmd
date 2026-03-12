@@ -1,0 +1,11 @@
+flowchart LR
+    A["Kafka signals.vwap"] --> B["paper_engine"]
+    C["Kafka candles.1m"] --> B
+    B --> D["Maintain latest candle state"]
+    B --> E["Apply risk limits and session rules"]
+    E --> F{"Trade generated?"}
+    F -->|Yes| G["Publish trades.paper"]
+    F -->|No| H["No order emitted"]
+    B --> I["Periodic MTM / PnL snapshot"]
+    I --> J["Publish pnl.paper"]
+    B --> K["Prometheus metrics<br/>port 9102"]

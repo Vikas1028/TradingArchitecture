@@ -12,6 +12,7 @@ import (
 type IndexState struct {
 	Symbol  string
 	Candles []Candle
+	DayKey  string
 }
 
 // BiasEngine maintains rolling index candle history and computes a directional market bias.
@@ -47,36 +48,52 @@ func NewBiasEngine(cfg StrategyConfig, tz *time.Location, logger *zap.Logger) *B
 // OnIndexCandle ingests a new index candle, updates rolling history, and recalculates market bias.
 // Inputs: Candle; Outputs: updated MarketBias.
 // Flow: store candle (uppercased symbol), truncate to lookback, compute % distance of close vs VWAP.
-//       If more positives than negatives beyond threshold -> BiasLong; vice versa -> BiasShort; else BiasNone.
+//
+//	If more positives than negatives beyond threshold -> BiasLong; vice versa -> BiasShort; else BiasNone.
 func (b *BiasEngine) OnIndexCandle(c Candle) MarketBias {
 	symbol := strings.ToUpper(c.Symbol)
+	candleTime := c.Time.In(b.tz)
+	dayKey := candleTime.Format("2006-01-02")
 	state, ok := b.indexState[symbol]
 	if !ok {
-		state = &IndexState{Symbol: symbol}
+		state = &IndexState{Symbol: symbol, DayKey: dayKey}
 		b.indexState[symbol] = state
+	}
+	if state.DayKey != dayKey {
+		state.Candles = state.Candles[:0]
+		state.DayKey = dayKey
 	}
 	state.Candles = append(state.Candles, c)
 	if len(state.Candles) > b.cfg.IndexBiasLookback {
 		state.Candles = state.Candles[len(state.Candles)-b.cfg.IndexBiasLookback:]
 	}
 
-	posCount := 0
-	negCount := 0
-	for _, candle := range state.Candles {
-		if candle.VWAP == 0 {
-			continue
+	longVotes := 0
+	shortVotes := 0
+	for _, idxState := range b.indexState {
+		posCount := 0
+		negCount := 0
+		for _, candle := range idxState.Candles {
+			if candle.VWAP == 0 {
+				continue
+			}
+			distPct := (candle.Close - candle.VWAP) / candle.VWAP * 100
+			if distPct > b.cfg.IndexBiasVWAPThresh {
+				posCount++
+			} else if distPct < -b.cfg.IndexBiasVWAPThresh {
+				negCount++
+			}
 		}
-		distPct := (candle.Close - candle.VWAP) / candle.VWAP * 100
-		if distPct > b.cfg.IndexBiasVWAPThresh {
-			posCount++
-		} else if distPct < -b.cfg.IndexBiasVWAPThresh {
-			negCount++
+		if posCount > negCount && posCount > 0 {
+			longVotes++
+		} else if negCount > posCount && negCount > 0 {
+			shortVotes++
 		}
 	}
 
-	if posCount > negCount && posCount > 0 {
+	if longVotes > shortVotes && longVotes > 0 {
 		b.current = BiasLong
-	} else if negCount > posCount && negCount > 0 {
+	} else if shortVotes > longVotes && shortVotes > 0 {
 		b.current = BiasShort
 	} else {
 		b.current = BiasNone

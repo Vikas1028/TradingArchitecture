@@ -11,12 +11,13 @@ import (
 // KafkaConfig holds Kafka-related settings for the VWAP strategy service.
 // It configures bootstrap servers, group, topics, and commit interval.
 type KafkaConfig struct {
-	BootstrapServers  string `json:"bootstrap_servers"`
-	GroupID           string `json:"group_id"`
-	StockCandlesTopic string `json:"stock_candles_topic"`
-	IndexCandlesTopic string `json:"index_candles_topic"`
-	SignalTopic       string `json:"signal_topic"`
-	CommitIntervalMs  int    `json:"commit_interval_ms"`
+	BootstrapServers      string `json:"bootstrap_servers"`
+	GroupID               string `json:"group_id"`
+	StockCandlesTopic     string `json:"stock_candles_topic"`
+	IndexCandlesTopic     string `json:"index_candles_topic"`
+	SignalTopic           string `json:"signal_topic"`
+	CommitIntervalMs      int    `json:"commit_interval_ms"`
+	StartupReplayGraceSec int    `json:"startup_replay_grace_sec"`
 }
 
 // LogConfig contains logging configuration.
@@ -82,10 +83,13 @@ func applyDefaults(cfg *AppConfig) {
 		cfg.Kafka.IndexCandlesTopic = "indices.1m"
 	}
 	if cfg.Kafka.SignalTopic == "" {
-		cfg.Kafka.SignalTopic = "signals.vwap"
+		cfg.Kafka.SignalTopic = "signals.strategy"
 	}
 	if cfg.Kafka.CommitIntervalMs == 0 {
 		cfg.Kafka.CommitIntervalMs = 1000
+	}
+	if cfg.Kafka.StartupReplayGraceSec == 0 {
+		cfg.Kafka.StartupReplayGraceSec = 120
 	}
 	if cfg.Strategy.Timezone == "" {
 		cfg.Strategy.Timezone = "Asia/Kolkata"
@@ -105,6 +109,9 @@ func validate(cfg *AppConfig) error {
 	}
 	if strings.TrimSpace(cfg.Kafka.GroupID) == "" {
 		missing = append(missing, "kafka.group_id")
+	}
+	if cfg.Kafka.StartupReplayGraceSec < 0 {
+		missing = append(missing, "kafka.startup_replay_grace_sec(>=0)")
 	}
 	if strings.TrimSpace(cfg.Log.File) == "" {
 		missing = append(missing, "log.file")

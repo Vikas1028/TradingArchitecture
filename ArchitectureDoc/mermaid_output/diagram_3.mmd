@@ -1,0 +1,9 @@
+flowchart LR
+    A["Kafka ticks.raw"] --> B["marketdata consumer"]
+    B --> C["1-minute candle builder"]
+    C --> D{"Symbol type"}
+    D -->|Index| E["Publish indices.1m"]
+    D -->|Equity| F["Publish candles.1m"]
+    B --> G["Periodic offset commits"]
+    C --> H["Flush open candles on shutdown"]
+    B --> I["Prometheus metrics<br/>port 9100"]

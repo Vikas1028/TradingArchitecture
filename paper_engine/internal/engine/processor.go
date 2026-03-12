@@ -73,6 +73,7 @@ func (e *Engine) CheckAndResetDayIfNeeded(now time.Time) {
 	e.logger.Info("new trading day detected; resetting state", zap.Time("prev_date", e.state.Daily.Date), zap.Time("new_date", nowInTz))
 	e.state.Positions = make(map[string]*Position)
 	e.state.LatestCandles = make(map[string]*Candle)
+	e.state.PendingSignals = make(map[string]*PendingSignal)
 	e.state.Daily = DailyState{Date: nowInTz}
 	metrics.TradingHalted.Set(0)
 }
@@ -83,8 +84,12 @@ func (e *Engine) CheckAndResetDayIfNeeded(now time.Time) {
 func (e *Engine) OnSignal(sig StrategySignal, latest *Candle) (*TradeEvent, error) {
 	symbol := strings.ToUpper(sig.Symbol)
 	sigTime := sig.Time.In(e.state.Tz)
+	e.CheckAndResetDayIfNeeded(sigTime)
 
 	if e.state.Daily.TradingHalted {
+		return nil, nil
+	}
+	if sig.Side != SideBuy {
 		return nil, nil
 	}
 	if !e.IsWithinEntryWindow(sigTime) {
@@ -109,7 +114,12 @@ func (e *Engine) OnSignal(sig StrategySignal, latest *Candle) (*TradeEvent, erro
 	}
 	qty := int64(math.Floor(e.state.Risk.CapitalPerTrade / entryPrice))
 	if qty <= 0 {
-		return nil, errors.New("calculated quantity <= 0")
+		e.logger.Debug("skipping signal: calculated quantity <= 0",
+			zap.String("symbol", symbol),
+			zap.Float64("entry_price", entryPrice),
+			zap.Float64("capital_per_trade", e.state.Risk.CapitalPerTrade),
+		)
+		return nil, nil
 	}
 
 	pos := &Position{
@@ -135,6 +145,44 @@ func (e *Engine) OnSignal(sig StrategySignal, latest *Candle) (*TradeEvent, erro
 		Reason:     "ENTRY_FROM_SIGNAL",
 	}
 	return trade, nil
+}
+
+// QueueSignal stores the latest signal for a symbol until pricing data catches up.
+func (e *Engine) QueueSignal(sig StrategySignal, now time.Time) {
+	symbol := strings.ToUpper(sig.Symbol)
+	copySig := sig
+	copySig.Symbol = symbol
+	e.state.PendingSignals[symbol] = &PendingSignal{
+		Signal:   copySig,
+		QueuedAt: now.In(e.state.Tz),
+	}
+}
+
+// ConsumePendingSignal returns and removes a queued signal for the symbol if present.
+func (e *Engine) ConsumePendingSignal(symbol string) *StrategySignal {
+	symbol = strings.ToUpper(symbol)
+	pending := e.state.PendingSignals[symbol]
+	if pending != nil {
+		delete(e.state.PendingSignals, symbol)
+		return &pending.Signal
+	}
+	return nil
+}
+
+// DrainExpiredPendingSignals removes and returns signals older than maxAge.
+func (e *Engine) DrainExpiredPendingSignals(now time.Time, maxAge time.Duration) []PendingSignal {
+	if maxAge <= 0 {
+		return nil
+	}
+	nowInTz := now.In(e.state.Tz)
+	expired := make([]PendingSignal, 0)
+	for symbol, pending := range e.state.PendingSignals {
+		if nowInTz.Sub(pending.QueuedAt) > maxAge {
+			expired = append(expired, *pending)
+			delete(e.state.PendingSignals, symbol)
+		}
+	}
+	return expired
 }
 
 // OnCandle processes a new Candle, updates PnL, and emits exits on SL/TP/EOD.

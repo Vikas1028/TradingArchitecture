@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.tradingarchitecture.start-services-on-startup</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/zsh</string>
+    <string>-lc</string>
+    <string>/Users/vikasbhandekar/Desktop/TradingArchitecture/shellscripts/start_services_on_startup.sh</string>
+  </array>
+
+  <key>RunAtLoad</key>
+  <true/>
+
+  <key>KeepAlive</key>
+  <false/>
+
+  <key>StandardOutPath</key>
+  <string>/Users/vikasbhandekar/Desktop/TradingArchitecture/logs/start_services_on_startup.stdout.log</string>
+
+  <key>StandardErrorPath</key>
+  <string>/Users/vikasbhandekar/Desktop/TradingArchitecture/logs/start_services_on_startup.stderr.log</string>
+</dict>
+</plist>
+

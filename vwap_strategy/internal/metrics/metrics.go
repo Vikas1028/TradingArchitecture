@@ -17,7 +17,7 @@ var (
 	// SignalsEmittedTotal counts signals published to Kafka.
 	SignalsEmittedTotal = prometheus.NewCounter(prometheus.CounterOpts{
 		Name: "vwap_strategy_signals_emitted_total",
-		Help: "Total signals emitted to signals.vwap",
+		Help: "Total signals emitted to the configured strategy topic",
 	})
 	// ErrorsTotal counts errors in the strategy service.
 	ErrorsTotal = prometheus.NewCounter(prometheus.CounterOpts{

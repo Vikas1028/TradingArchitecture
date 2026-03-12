@@ -11,30 +11,32 @@ import (
 
 // PullbackConfig mirrors strategy config fields needed by the VWAP pullback logic.
 type PullbackConfig struct {
-	Timezone       string
-	EntryStart     string
-	EntryEnd       string
-	TrendLookback  int
-	PullbackWindow int
-	MinBodyPct     float64
-	MaxPullbackPct float64
+	Timezone        string
+	EntryStart      string
+	EntryEnd        string
+	TrendLookback   int
+	PullbackWindow  int
+	MinBodyPct      float64
+	MaxPullbackPct  float64
 	EnableIndexBias bool
 }
 
 // SymbolTrendState holds recent candles for a stock used by the VWAP pullback strategy.
 // It keeps a rolling buffer to evaluate trend and pullback conditions.
 type SymbolTrendState struct {
-	Symbol  string
-	Candles []Candle
+	Symbol        string
+	Candles       []Candle
+	DayKey        string
+	LastSignalDay string
 }
 
 // VwapPullbackStrategy implements the VWAP pullback LONG-only strategy.
 // Inputs: stock candles and current market bias; Outputs: optional BUY signal.
 type VwapPullbackStrategy struct {
-	cfg     PullbackConfig
-	tz      *time.Location
-	logger  *zap.Logger
-	symbols map[string]*SymbolTrendState
+	cfg        PullbackConfig
+	tz         *time.Location
+	logger     *zap.Logger
+	symbols    map[string]*SymbolTrendState
 	entryStart time.Duration
 	entryEnd   time.Duration
 }
@@ -52,10 +54,10 @@ func NewVwapPullbackStrategy(cfg PullbackConfig, tz *time.Location, logger *zap.
 		return nil, err
 	}
 	return &VwapPullbackStrategy{
-		cfg:       cfg,
-		tz:        tz,
-		logger:    logger,
-		symbols:   make(map[string]*SymbolTrendState),
+		cfg:        cfg,
+		tz:         tz,
+		logger:     logger,
+		symbols:    make(map[string]*SymbolTrendState),
 		entryStart: startDur,
 		entryEnd:   endDur,
 	}, nil
@@ -68,19 +70,33 @@ func NewVwapPullbackStrategy(cfg PullbackConfig, tz *time.Location, logger *zap.
 func (s *VwapPullbackStrategy) OnStockCandle(c Candle, bias MarketBias) *StrategySignal {
 	symbol := strings.ToUpper(c.Symbol)
 	candleTime := c.Time.In(s.tz)
+	dayKey := candleTime.Format("2006-01-02")
 
 	if !s.withinEntryWindow(candleTime) {
+		s.logger.Debug("signal rejected: outside entry window",
+			zap.String("symbol", symbol),
+			zap.Time("candle_time", candleTime),
+		)
 		return nil
 	}
 
 	if s.cfg.EnableIndexBias && bias != BiasLong {
+		s.logger.Debug("signal rejected: index bias not long",
+			zap.String("symbol", symbol),
+			zap.String("bias", string(bias)),
+		)
 		return nil
 	}
 
 	state, ok := s.symbols[symbol]
 	if !ok {
-		state = &SymbolTrendState{Symbol: symbol}
+		state = &SymbolTrendState{Symbol: symbol, DayKey: dayKey}
 		s.symbols[symbol] = state
+	}
+	if state.DayKey != dayKey {
+		state.Candles = state.Candles[:0]
+		state.DayKey = dayKey
+		state.LastSignalDay = ""
 	}
 
 	state.Candles = append(state.Candles, c)
@@ -90,21 +106,34 @@ func (s *VwapPullbackStrategy) OnStockCandle(c Candle, bias MarketBias) *Strateg
 	}
 
 	if len(state.Candles) < s.cfg.TrendLookback || len(state.Candles) < s.cfg.PullbackWindow {
+		s.logger.Debug("signal rejected: insufficient candle history",
+			zap.String("symbol", symbol),
+			zap.Int("history", len(state.Candles)),
+		)
 		return nil
 	}
 
 	if !s.isUptrend(state.Candles, s.cfg.TrendLookback) {
+		s.logger.Debug("signal rejected: uptrend filter failed", zap.String("symbol", symbol))
 		return nil
 	}
 
 	if !s.hasRecentPullback(state.Candles, s.cfg.PullbackWindow) {
+		s.logger.Debug("signal rejected: pullback filter failed", zap.String("symbol", symbol))
 		return nil
 	}
 
 	if !s.confirmation(state.Candles) {
+		s.logger.Debug("signal rejected: confirmation failed", zap.String("symbol", symbol))
 		return nil
 	}
 
+	if state.LastSignalDay == dayKey {
+		s.logger.Debug("signal rejected: already emitted today", zap.String("symbol", symbol))
+		return nil
+	}
+
+	state.LastSignalDay = dayKey
 	return &StrategySignal{
 		Strategy: "VWAP_PULLBACK_V1",
 		Symbol:   symbol,

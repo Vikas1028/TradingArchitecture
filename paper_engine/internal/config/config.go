@@ -13,13 +13,16 @@ import (
 type KafkaConfig struct {
 	BootstrapServers string `json:"bootstrap_servers"`
 	GroupID          string `json:"group_id"`
+	SignalsGroupID   string `json:"signals_group_id"`
+	CandlesGroupID   string `json:"candles_group_id"`
 
 	SignalsTopic string `json:"signals_topic"`
 	CandlesTopic string `json:"candles_topic"`
 	TradesTopic  string `json:"trades_topic"`
 	PnlTopic     string `json:"pnl_topic"`
 
-	CommitIntervalMs int `json:"commit_interval_ms"`
+	CommitIntervalMs      int `json:"commit_interval_ms"`
+	StartupReplayGraceSec int `json:"startup_replay_grace_sec"`
 }
 
 // LogConfig contains logging configuration.
@@ -37,6 +40,7 @@ type TradingConfig struct {
 	EntryEnd               string `json:"entry_end"`
 	EODFlatTime            string `json:"eod_flat_time"`
 	MtmSnapshotIntervalSec int    `json:"mtm_snapshot_interval_sec"`
+	PendingSignalMaxAgeSec int    `json:"pending_signal_max_age_sec"`
 }
 
 // RiskConfig defines risk management parameters for the paper engine.
@@ -86,7 +90,7 @@ func LoadConfig(path string) (*AppConfig, error) {
 
 func applyDefaults(cfg *AppConfig) {
 	if cfg.Kafka.SignalsTopic == "" {
-		cfg.Kafka.SignalsTopic = "signals.vwap"
+		cfg.Kafka.SignalsTopic = "signals.strategy"
 	}
 	if cfg.Kafka.CandlesTopic == "" {
 		cfg.Kafka.CandlesTopic = "candles.1m"
@@ -100,11 +104,29 @@ func applyDefaults(cfg *AppConfig) {
 	if cfg.Kafka.CommitIntervalMs == 0 {
 		cfg.Kafka.CommitIntervalMs = 1000
 	}
+	if cfg.Kafka.StartupReplayGraceSec == 0 {
+		cfg.Kafka.StartupReplayGraceSec = 120
+	}
+	if strings.TrimSpace(cfg.Kafka.SignalsGroupID) == "" {
+		cfg.Kafka.SignalsGroupID = strings.TrimSpace(cfg.Kafka.GroupID)
+		if cfg.Kafka.SignalsGroupID != "" {
+			cfg.Kafka.SignalsGroupID += "-signals"
+		}
+	}
+	if strings.TrimSpace(cfg.Kafka.CandlesGroupID) == "" {
+		cfg.Kafka.CandlesGroupID = strings.TrimSpace(cfg.Kafka.GroupID)
+		if cfg.Kafka.CandlesGroupID != "" {
+			cfg.Kafka.CandlesGroupID += "-candles"
+		}
+	}
 	if cfg.Trading.Timezone == "" {
 		cfg.Trading.Timezone = "Asia/Kolkata"
 	}
 	if cfg.Trading.MtmSnapshotIntervalSec == 0 {
 		cfg.Trading.MtmSnapshotIntervalSec = 60
+	}
+	if cfg.Trading.PendingSignalMaxAgeSec == 0 {
+		cfg.Trading.PendingSignalMaxAgeSec = 180
 	}
 	if strings.TrimSpace(cfg.Log.Level) == "" {
 		cfg.Log.Level = "INFO"
@@ -122,6 +144,15 @@ func validate(cfg *AppConfig) error {
 	if strings.TrimSpace(cfg.Kafka.GroupID) == "" {
 		missing = append(missing, "kafka.group_id")
 	}
+	if strings.TrimSpace(cfg.Kafka.SignalsGroupID) == "" {
+		missing = append(missing, "kafka.signals_group_id")
+	}
+	if strings.TrimSpace(cfg.Kafka.CandlesGroupID) == "" {
+		missing = append(missing, "kafka.candles_group_id")
+	}
+	if cfg.Kafka.StartupReplayGraceSec < -1 {
+		missing = append(missing, "kafka.startup_replay_grace_sec(>=0 or -1 to disable)")
+	}
 	if strings.TrimSpace(cfg.Log.File) == "" {
 		missing = append(missing, "log.file")
 	}
@@ -133,6 +164,9 @@ func validate(cfg *AppConfig) error {
 	}
 	if strings.TrimSpace(cfg.Trading.EODFlatTime) == "" {
 		missing = append(missing, "trading.eod_flat_time")
+	}
+	if cfg.Trading.PendingSignalMaxAgeSec < 0 {
+		missing = append(missing, "trading.pending_signal_max_age_sec(>=0)")
 	}
 	if cfg.Risk.CapitalPerTrade <= 0 {
 		missing = append(missing, "risk.capital_per_trade")

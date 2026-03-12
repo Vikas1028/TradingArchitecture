@@ -1,0 +1,21 @@
+{
+  "env": "prod",
+  "kafka": {
+    "bootstrap_servers": "localhost:9092",
+    "group_id": "first-candle-strategy",
+    "candles_topic": "candles.1m",
+    "signal_topic": "signals.strategy",
+    "commit_interval_ms": 1000,
+    "startup_replay_grace_sec": 120
+  },
+  "log": {
+    "level": "DEBUG",
+    "file": "logs/first_candle_strategy.log"
+  },
+  "strategy": {
+    "timezone": "Asia/Kolkata",
+    "session_start": "09:15",
+    "opening_candle_slot": 1,
+    "move_threshold_pct": 0.5
+  }
+}

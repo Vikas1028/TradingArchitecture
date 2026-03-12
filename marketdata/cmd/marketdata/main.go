@@ -147,14 +147,20 @@ func run(configPath string) error {
 
 shutdown:
 	if cfg.Aggregation.FlushOnShutdown {
+		flushCtx, cancelFlush := context.WithTimeout(context.Background(), 5*time.Second)
 		candles := builder.FlushAll()
 		for _, c := range candles {
 			if indexSet[c.Symbol] {
-				_ = producer.PublishIndexCandle(context.Background(), c)
+				if err := producer.PublishIndexCandle(flushCtx, c); err != nil {
+					logger.Warn("shutdown publish index candle failed", zap.Error(err), zap.String("symbol", c.Symbol))
+				}
 			} else {
-				_ = producer.PublishStockCandle(context.Background(), c)
+				if err := producer.PublishStockCandle(flushCtx, c); err != nil {
+					logger.Warn("shutdown publish stock candle failed", zap.Error(err), zap.String("symbol", c.Symbol))
+				}
 			}
 		}
+		cancelFlush()
 	}
 
 	// Final commit and flush.
