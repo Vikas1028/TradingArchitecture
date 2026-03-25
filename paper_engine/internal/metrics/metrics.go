@@ -38,6 +38,36 @@ var (
 		Name: "paper_engine_trading_halted",
 		Help: "Trading halted flag (1=halted,0=active)",
 	})
+	// RealizedPnl tracks the current realized PnL for the trading day.
+	RealizedPnl = prometheus.NewGauge(prometheus.GaugeOpts{
+		Name: "paper_engine_realized_pnl",
+		Help: "Current realized PnL for the trading day",
+	})
+	// UnrealizedPnl tracks the current mark-to-market unrealized PnL.
+	UnrealizedPnl = prometheus.NewGauge(prometheus.GaugeOpts{
+		Name: "paper_engine_unrealized_pnl",
+		Help: "Current unrealized PnL for open positions",
+	})
+	// OpenPositions tracks how many paper positions are currently open.
+	OpenPositions = prometheus.NewGauge(prometheus.GaugeOpts{
+		Name: "paper_engine_open_positions",
+		Help: "Number of currently open paper positions",
+	})
+	// PendingSignals tracks strategy signals waiting for pricing candles.
+	PendingSignals = prometheus.NewGauge(prometheus.GaugeOpts{
+		Name: "paper_engine_pending_signals",
+		Help: "Number of queued strategy signals waiting for pricing candles",
+	})
+	// TradesToday tracks how many trades were opened today.
+	TradesToday = prometheus.NewGauge(prometheus.GaugeOpts{
+		Name: "paper_engine_trades_today",
+		Help: "Number of trades opened during the current trading day",
+	})
+	// MaxDrawdown tracks the maximum realized drawdown reached during the day.
+	MaxDrawdown = prometheus.NewGauge(prometheus.GaugeOpts{
+		Name: "paper_engine_max_drawdown",
+		Help: "Maximum realized drawdown reached during the current trading day",
+	})
 )
 
 // InitAndServeMetrics registers metrics and starts /metrics HTTP server on given port.
@@ -48,6 +78,12 @@ func InitAndServeMetrics(port string) error {
 		PnlSnapshotsTotal,
 		ErrorsTotal,
 		TradingHalted,
+		RealizedPnl,
+		UnrealizedPnl,
+		OpenPositions,
+		PendingSignals,
+		TradesToday,
+		MaxDrawdown,
 	)
 
 	http.Handle("/metrics", promhttp.Handler())

@@ -1,0 +1,6 @@
+{
+  "enable": true,
+  "level": "info",
+  "format": "json",
+  "console": true
+}

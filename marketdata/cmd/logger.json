@@ -1,0 +1,8 @@
+{
+  "enable": true,
+  "level": "INFO",
+  "format": "json",
+  "log_dir": "logs",
+  "file_name": "marketdata_service.log",
+  "console": true
+}

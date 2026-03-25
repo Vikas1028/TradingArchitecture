@@ -10,6 +10,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"vwap_strategy/common"
 	"vwap_strategy/internal/config"
 	"vwap_strategy/internal/kafka"
 	"vwap_strategy/internal/logging"
@@ -20,7 +21,7 @@ import (
 // main wires configuration, logging, Kafka IO, bias engine, and VWAP pullback strategy.
 // Flow: load config, init logger, create consumer/producer, process candles into signals until shutdown.
 func main() {
-	configPath := flag.String("config", "config/vwap_strategy_config.json", "path to config file")
+	configPath := flag.String("config", "", "path to config file")
 	flag.Parse()
 	if err := run(*configPath); err != nil {
 		zap.L().Fatal("service exited with error", zap.Error(err))
@@ -35,16 +36,18 @@ func run(configPath string) error {
 		return err
 	}
 
-	logger, err := logging.NewLogger(cfg.Log)
+	logger, err := logging.NewLogger()
 	if err != nil {
 		return err
 	}
 	defer logger.Sync() //nolint:errcheck
 	zap.ReplaceGlobals(logger)
-	_ = metrics.InitAndServeMetrics("9101")
+	_ = metrics.InitAndServeMetrics(common.DefaultMetricsPort)
 	metrics.ServiceUp.Set(1)
 
 	logger.Info("starting vwap strategy service",
+		zap.String("app", common.AppName),
+		zap.String("version", common.AppVersion),
 		zap.String("env", cfg.Env),
 		zap.String("bootstrap", cfg.Kafka.BootstrapServers),
 		zap.String("group", cfg.Kafka.GroupID),
@@ -102,19 +105,11 @@ func run(configPath string) error {
 		return err
 	}
 
-	commitTicker := time.NewTicker(time.Duration(cfg.Kafka.CommitIntervalMs) * time.Millisecond)
-	defer commitTicker.Stop()
-
 	for {
 		select {
 		case <-ctx.Done():
 			logger.Info("context cancelled; exiting loop")
 			goto shutdown
-		case <-commitTicker.C:
-			if err := consumer.Commit(); err != nil {
-				logger.Warn("commit failed", zap.Error(err))
-				metrics.ErrorsTotal.Inc()
-			}
 		default:
 			polled, err := consumer.Poll(ctx)
 			if err != nil {
@@ -125,11 +120,15 @@ func run(configPath string) error {
 			if polled == nil {
 				continue
 			}
-			if polled.Topic == cfg.Kafka.IndexCandlesTopic {
+			if err := consumer.Commit(); err != nil {
+				logger.Warn("commit failed", zap.Error(err))
+				metrics.ErrorsTotal.Inc()
+			}
+			if polled.Topic == "index" {
 				metrics.CandlesConsumedTotal.Inc()
 				bias := biasEngine.OnIndexCandle(polled.Candle)
 				logger.Debug("bias updated", zap.String("symbol", polled.Candle.Symbol), zap.String("bias", string(bias)))
-			} else if polled.Topic == cfg.Kafka.StockCandlesTopic {
+			} else if polled.Topic == "stock" {
 				bias := strategy.BiasNone
 				if cfg.Strategy.EnableIndexBias {
 					bias = biasEngine.CurrentBias()

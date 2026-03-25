@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from python_feed_triplex import metrics
-from python_feed_triplex.internal.login.smartapi_login import AngelSession, create_angel_session, logout_angel_session
+from python_feed_triplex.internal.login.smartapi_login import AngelSession, create_angel_session
 
 try:
     from SmartApi.smartWebSocketV2 import SmartWebSocketV2
@@ -61,6 +61,7 @@ class AngelWSClient:
         token_mapping: Dict[str, Tuple[str, str]],
         instrument_token_map: Dict[str, str],
         connection_id: str = "ws-primary",
+        state_handler: Optional[Callable[[bool], None]] = None,
     ) -> None:
         self.cfg = cfg
         self.logger = logger
@@ -68,10 +69,12 @@ class AngelWSClient:
         self.token_mapping = token_mapping
         self.instrument_token_map = instrument_token_map
         self.connection_id = connection_id
+        self.state_handler = state_handler
         self._ws: Optional[SmartWebSocketV2] = None
         self._session: Optional[AngelSession] = None
         self._connected = threading.Event()
         self._last_tick_monotonic = time.monotonic()
+        self._last_open_monotonic = 0.0
         self._open_events = 0
         self._last_disconnect_reason = "unknown"
         self.logger.debug(
@@ -98,7 +101,7 @@ class AngelWSClient:
             api_key=self._session.api_key,
             client_code=self._session.client_id,
             feed_token=self._session.feed_token,
-            max_retry_attempt=10,
+            max_retry_attempt=2,
             retry_strategy=1,
         )
         ws.on_open = self._on_open
@@ -125,6 +128,8 @@ class AngelWSClient:
             metrics.WS_CLIENT_DISCONNECTS.labels(client=self.connection_id, reason="manual_close").inc()
             metrics.WS_CLIENT_LAST_DISCONNECT_UNIX.labels(client=self.connection_id).set(time.time())
         self._connected.clear()
+        if self.state_handler:
+            self.state_handler(False)
         metrics.WS_CONNECTED.set(0)
         metrics.WS_CLIENT_CONNECTED.labels(client=self.connection_id).set(0)
 
@@ -160,7 +165,9 @@ class AngelWSClient:
             raise RuntimeError("Websocket not initialized. Call connect() first.")
         ws = self._ws
         self.logger.info("Starting websocket loop id=%s", self.connection_id)
-        stall_timeout_sec = int(self.cfg.get("reconnect", {}).get("no_ticks_relogin_sec", 10))
+        reconnect_cfg = self.cfg.get("reconnect", {})
+        stall_timeout_sec = int(reconnect_cfg.get("no_ticks_reconnect_sec", reconnect_cfg.get("no_ticks_relogin_sec", 45)))
+        connect_grace_sec = int(reconnect_cfg.get("connect_grace_sec", 60))
 
         def _connect_blocking() -> None:
             try:
@@ -179,33 +186,35 @@ class AngelWSClient:
         try:
             while not shutdown_event.is_set() and thread.is_alive():
                 if self._connected.is_set() and stall_timeout_sec > 0 and self._in_trading_window():
+                    open_age = time.monotonic() - self._last_open_monotonic
+                    if open_age < connect_grace_sec:
+                        time.sleep(0.5)
+                        continue
                     stalled_for = time.monotonic() - self._last_tick_monotonic
                     metrics.LAST_TICK_AGE_SECONDS.set(stalled_for)
                     if stalled_for >= stall_timeout_sec:
                         self.logger.warning(
-                            "No ticks for %.1fs on id=%s; forcing full relogin + websocket recreate",
+                            "No ticks for %.1fs on id=%s; forcing websocket recreate",
                             stalled_for,
                             self.connection_id,
                         )
                         metrics.WS_STALL_RECONNECTS.inc()
                         metrics.WS_CLIENT_NO_TICK_RELOGINS.labels(client=self.connection_id).inc()
                         metrics.WS_CLIENT_LAST_NO_TICK_RELOGIN_UNIX.labels(client=self.connection_id).set(time.time())
-                        try:
-                            logout_angel_session(self.cfg.get("angel", {}), self.logger)
-                        except Exception as exc:  # pylint: disable=broad-except
-                            self.logger.warning("Logout step failed for id=%s: %s", self.connection_id, exc)
                         metrics.WS_RECONNECTS.inc()
                         if self._connected.is_set():
-                            metrics.WS_CLIENT_DISCONNECTS.labels(client=self.connection_id, reason="no_tick_relogin").inc()
+                            metrics.WS_CLIENT_DISCONNECTS.labels(client=self.connection_id, reason="no_tick_reconnect").inc()
                             metrics.WS_CLIENT_LAST_DISCONNECT_UNIX.labels(client=self.connection_id).set(time.time())
                             metrics.WS_CLIENT_CONNECTED.labels(client=self.connection_id).set(0)
-                            self._last_disconnect_reason = "no_tick_relogin"
+                            self._last_disconnect_reason = "no_tick_reconnect"
                             self._connected.clear()
+                            if self.state_handler:
+                                self.state_handler(False)
                         try:
                             ws.close_connection()
                         except Exception as exc:  # pylint: disable=broad-except
-                            self.logger.warning("Failed closing websocket during relogin id=%s: %s", self.connection_id, exc)
-                        raise RuntimeError(f"stale websocket detected for {self.connection_id}; relogin required")
+                            self.logger.warning("Failed closing websocket during recreate id=%s: %s", self.connection_id, exc)
+                        raise RuntimeError(f"stale websocket detected for {self.connection_id}; recreate required")
                 time.sleep(0.5)
             if shutdown_event.is_set():
                 self.logger.info("Shutdown event set; closing websocket id=%s", self.connection_id)
@@ -223,8 +232,11 @@ class AngelWSClient:
     # Flow: set connected flag and subscribe to configured instruments.
     def _on_open(self, wsapp: Any) -> None:  # pylint: disable=unused-argument
         self._open_events += 1
+        self._last_open_monotonic = time.monotonic()
         self._last_tick_monotonic = time.monotonic()
         self._connected.set()
+        if self.state_handler:
+            self.state_handler(True)
         metrics.WS_CONNECTED.set(1)
         metrics.WS_CLIENT_CONNECTED.labels(client=self.connection_id).set(1)
         metrics.WS_OPEN_EVENTS.inc()
@@ -277,6 +289,8 @@ class AngelWSClient:
             metrics.WS_CLIENT_DISCONNECTS.labels(client=self.connection_id, reason="error").inc()
             metrics.WS_CLIENT_LAST_DISCONNECT_UNIX.labels(client=self.connection_id).set(time.time())
         self._connected.clear()
+        if self.state_handler:
+            self.state_handler(False)
         metrics.WS_CONNECTED.set(0)
         metrics.WS_CLIENT_CONNECTED.labels(client=self.connection_id).set(0)
         metrics.WS_RECONNECTS.inc()
@@ -294,6 +308,8 @@ class AngelWSClient:
             metrics.WS_CLIENT_DISCONNECTS.labels(client=self.connection_id, reason=reason).inc()
             metrics.WS_CLIENT_LAST_DISCONNECT_UNIX.labels(client=self.connection_id).set(time.time())
         self._connected.clear()
+        if self.state_handler:
+            self.state_handler(False)
         metrics.WS_CONNECTED.set(0)
         metrics.WS_CLIENT_CONNECTED.labels(client=self.connection_id).set(0)
         metrics.WS_RECONNECTS.inc()
@@ -301,9 +317,6 @@ class AngelWSClient:
 
     def is_connected(self) -> bool:
         return self._connected.is_set()
-
-    def last_tick_age_seconds(self) -> float:
-        return time.monotonic() - self._last_tick_monotonic
 
     def _in_trading_window(self) -> bool:
         now = datetime.now().astimezone()

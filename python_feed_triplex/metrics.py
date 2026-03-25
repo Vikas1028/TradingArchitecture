@@ -2,6 +2,11 @@
 
 from __future__ import annotations
 
+import platform
+import resource
+import threading
+import time
+
 from prometheus_client import Counter, Gauge, start_http_server
 
 # Gauges
@@ -87,8 +92,32 @@ WS_CLIENT_NO_TICK_RELOGINS = Counter(
 ERRORS_TOTAL = Counter("python_feed_errors_total", "Total errors in python_feed")
 # Age of the most recent tick in seconds.
 LAST_TICK_AGE_SECONDS = Gauge("python_feed_last_tick_age_seconds", "Seconds since the last received tick")
+# Explicit process gauges for macOS, where the default Prometheus process collector is not reliable in this setup.
+PROCESS_CPU_SECONDS = Gauge(
+    "python_feed_process_cpu_seconds_total",
+    "Total process CPU seconds consumed by python_feed",
+)
+PROCESS_RESIDENT_MEMORY_BYTES = Gauge(
+    "python_feed_process_resident_memory_bytes",
+    "Resident memory used by python_feed in bytes",
+)
+
+
+def _resident_memory_bytes() -> int:
+    value = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    if platform.system().lower() == "darwin":
+        return int(value)
+    return int(value * 1024)
+
+
+def _process_sampler() -> None:
+    while True:
+        PROCESS_CPU_SECONDS.set(time.process_time())
+        PROCESS_RESIDENT_MEMORY_BYTES.set(_resident_memory_bytes())
+        time.sleep(1.0)
 
 
 def start_metrics_server(port: int = 9000) -> None:
     """Start Prometheus metrics HTTP server on the given port."""
     start_http_server(port)
+    threading.Thread(target=_process_sampler, name="python-feed-metrics", daemon=True).start()

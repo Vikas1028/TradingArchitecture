@@ -3,9 +3,12 @@ package kafka
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"strings"
 	"time"
+	"unicode"
 
-	kafkago "github.com/segmentio/kafka-go"
+	"github.com/nats-io/nats.go"
 	"go.uber.org/zap"
 
 	"marketdata/internal/candle"
@@ -13,82 +16,100 @@ import (
 	"marketdata/internal/metrics"
 )
 
-// CandleProducer wraps a Kafka producer responsible for sending Candle messages.
-// Inputs: KafkaConfig and logger; Outputs: published candles to stock/index topics.
 type CandleProducer struct {
-	writer     *kafkago.Writer
-	stockTopic string
-	indexTopic string
-	logger     *zap.Logger
+	conn        *nats.Conn
+	js          nats.JetStreamContext
+	stockPrefix string
+	indexPrefix string
+	logger      *zap.Logger
 }
 
-// NewCandleProducer creates a new Kafka producer for stock and index candle topics.
-// Inputs: KafkaConfig, logger.
-// Outputs: CandleProducer ready to publish.
-// Flow: build kafka-go writer with async disabled for easier error handling.
 func NewCandleProducer(cfg config.KafkaConfig, logger *zap.Logger) (*CandleProducer, error) {
-	writer := &kafkago.Writer{
-		Addr:         kafkago.TCP(cfg.BootstrapServers),
-		BatchTimeout: 10 * time.Millisecond,
-		RequiredAcks: kafkago.RequireOne,
-		Async:        false,
+	nc, js, err := connect(cfg.BootstrapServers)
+	if err != nil {
+		return nil, err
+	}
+	if err := ensureStream(js, cfg.StockCandlesTopic, 720*time.Hour); err != nil {
+		nc.Close()
+		return nil, err
+	}
+	if err := ensureStream(js, cfg.IndexCandlesTopic, 720*time.Hour); err != nil {
+		nc.Close()
+		return nil, err
 	}
 	metrics.KafkaOutConnected.Set(1)
 	return &CandleProducer{
-		writer:     writer,
-		stockTopic: cfg.StockCandlesTopic,
-		indexTopic: cfg.IndexCandlesTopic,
-		logger:     logger,
+		conn:        nc,
+		js:          js,
+		stockPrefix: cfg.StockCandlesTopic,
+		indexPrefix: cfg.IndexCandlesTopic,
+		logger:      logger,
 	}, nil
 }
 
-// PublishStockCandle serializes the Candle and publishes it to the stock candle topic.
-// Inputs: context, Candle.
-// Outputs: error on failure.
-// Flow: marshal JSON, send with symbol as key.
-func (p *CandleProducer) PublishStockCandle(ctx context.Context, c candle.Candle) error {
-	return p.publish(ctx, p.stockTopic, c)
-}
-
-// PublishIndexCandle serializes the Candle and publishes it to the index candle topic.
-// Inputs: context, Candle.
-// Outputs: error on failure.
-// Flow: marshal JSON, send with symbol as key.
-func (p *CandleProducer) PublishIndexCandle(ctx context.Context, c candle.Candle) error {
-	return p.publish(ctx, p.indexTopic, c)
-}
-
-// Flush flushes pending messages in the producer before shutdown.
-// Inputs: timeout duration.
-// Outputs: error on failure.
-// Flow: call writer.Close after waiting for in-flight messages.
-func (p *CandleProducer) Flush(timeout time.Duration) error {
-	// kafka-go writer closes synchronously; we ignore timeout as Close is blocking.
-	err := p.writer.Close()
-	metrics.KafkaOutConnected.Set(0)
-	return err
-}
-
-func (p *CandleProducer) publish(ctx context.Context, topic string, c candle.Candle) error {
+func (p *CandleProducer) PublishCandle(ctx context.Context, c candle.Candle, isIndex bool) error {
+	prefix := p.stockPrefix
+	if isIndex {
+		prefix = p.indexPrefix
+	}
 	payload, err := json.Marshal(c)
 	if err != nil {
 		metrics.ErrorsTotal.Inc()
 		return err
 	}
-	msg := kafkago.Message{
-		Topic: topic,
-		Key:   []byte(c.Symbol),
-		Value: payload,
-		Time:  c.Time,
-	}
-	if err := p.writer.WriteMessages(ctx, msg); err != nil {
-		p.logger.Error("failed to publish candle", zap.Error(err), zap.String("symbol", c.Symbol), zap.String("topic", topic))
+	subject := candleSubject(prefix, c.Timeframe, c.Symbol)
+	_, err = p.js.PublishMsg(&nats.Msg{
+		Subject: subject,
+		Data:    payload,
+		Header: nats.Header{
+			"Timeframe": []string{c.Timeframe},
+			"Symbol":    []string{c.Symbol},
+		},
+	}, nats.Context(ctx))
+	if err != nil {
+		p.logger.Error("failed to publish candle", zap.Error(err), zap.String("symbol", c.Symbol), zap.String("subject", subject))
 		metrics.KafkaOutConnected.Set(0)
 		metrics.ErrorsTotal.Inc()
 		return err
 	}
 	metrics.KafkaOutConnected.Set(1)
 	metrics.CandlesEmittedTotal.Inc()
-	p.logger.Debug("published candle", zap.String("symbol", c.Symbol), zap.String("topic", topic), zap.Time("time", c.Time))
+	p.logger.Debug("published candle", zap.String("symbol", c.Symbol), zap.String("subject", subject), zap.String("timeframe", c.Timeframe), zap.Time("time", c.Time))
 	return nil
+}
+
+func (p *CandleProducer) Flush(timeout time.Duration) error {
+	_ = timeout
+	metrics.KafkaOutConnected.Set(0)
+	if p.conn != nil {
+		p.conn.Flush()
+		p.conn.Drain()
+		p.conn.Close()
+	}
+	return nil
+}
+
+func candleSubject(prefix, timeframe, symbol string) string {
+	kind := "stock"
+	if strings.Contains(strings.ToLower(prefix), "indices") {
+		kind = "index"
+	}
+	return fmt.Sprintf("%s.%s.%s.%s", strings.TrimSpace(prefix), kind, sanitizeToken(timeframe), sanitizeToken(symbol))
+}
+
+func sanitizeToken(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "UNKNOWN"
+	}
+	return strings.Map(func(r rune) rune {
+		switch {
+		case unicode.IsLetter(r), unicode.IsDigit(r):
+			return r
+		case r == '-', r == '_':
+			return r
+		default:
+			return '_'
+		}
+	}, value)
 }

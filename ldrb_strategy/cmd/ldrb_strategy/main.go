@@ -10,6 +10,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"ldrb_strategy/common"
 	"ldrb_strategy/internal/config"
 	"ldrb_strategy/internal/kafka"
 	"ldrb_strategy/internal/logging"
@@ -18,29 +19,32 @@ import (
 )
 
 func main() {
-	configPath := flag.String("config", "config/ldrb_strategy_config.json", "path to config file")
+	configPath := flag.String("config", "", "path to config file")
 	flag.Parse()
 	if err := run(*configPath); err != nil {
 		zap.L().Fatal("service exited with error", zap.Error(err))
 	}
 }
 
+// run loads dependencies, consumes stock/index candles, and publishes LDRB signals.
 func run(configPath string) error {
 	cfg, err := config.LoadConfig(configPath)
 	if err != nil {
 		return err
 	}
 
-	logger, err := logging.NewLogger(cfg.Log)
+	logger, err := logging.NewLogger()
 	if err != nil {
 		return err
 	}
 	defer logger.Sync() //nolint:errcheck
 	zap.ReplaceGlobals(logger)
-	_ = metrics.InitAndServeMetrics("9106")
+	_ = metrics.InitAndServeMetrics(common.DefaultMetricsPort)
 	metrics.ServiceUp.Set(1)
 
 	logger.Info("starting ldrb strategy service",
+		zap.String("app", common.AppName),
+		zap.String("version", common.AppVersion),
 		zap.String("env", cfg.Env),
 		zap.String("bootstrap", cfg.Kafka.BootstrapServers),
 		zap.String("group", cfg.Kafka.GroupID),
@@ -121,18 +125,10 @@ func run(configPath string) error {
 		return err
 	}
 
-	commitTicker := time.NewTicker(time.Duration(cfg.Kafka.CommitIntervalMs) * time.Millisecond)
-	defer commitTicker.Stop()
-
 	for {
 		select {
 		case <-ctx.Done():
 			goto shutdown
-		case <-commitTicker.C:
-			if err := consumer.Commit(); err != nil {
-				logger.Warn("commit failed", zap.Error(err))
-				metrics.ErrorsTotal.Inc()
-			}
 		default:
 			polled, err := consumer.Poll(ctx)
 			if err != nil {
@@ -143,12 +139,16 @@ func run(configPath string) error {
 			if polled == nil {
 				continue
 			}
+			if err := consumer.Commit(); err != nil {
+				logger.Warn("commit failed", zap.Error(err))
+				metrics.ErrorsTotal.Inc()
+			}
 
 			metrics.CandlesConsumedTotal.Inc()
 			var sig *strategy.StrategySignal
-			if polled.Topic == cfg.Kafka.IndexCandlesTopic {
+			if polled.Topic == "index" {
 				engine.OnIndexCandle(polled.Candle)
-			} else if polled.Topic == cfg.Kafka.StockCandlesTopic {
+			} else if polled.Topic == "stock" {
 				sig = engine.OnStockCandle(polled.Candle)
 			}
 			if sig == nil {

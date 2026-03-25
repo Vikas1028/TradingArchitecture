@@ -1,0 +1,1392 @@
+NEWS EVENT TRADING SERVICE - DETAILED ARCHITECTURE AND FLOW
+===============================================================
+
+Purpose
+-------
+This document defines a detailed architecture for a stock-news/event-based trading service.
+The service will fetch stock-related news and structured corporate events from the internet,
+classify them, map them to stocks, score their likely impact, combine them with live market
+reaction, and generate trading alerts/signals.
+
+This system is designed for:
+- Dividend-related event detection
+- Quarterly result-related event detection
+- Incident / breaking-news event detection
+- Event-based watchlists
+- Paper trading
+- Future integration with real trading
+
+This architecture is designed so it can be built primarily in Go.
+
+-------------------------------------------------------------------------------
+1. HIGH-LEVEL OBJECTIVE
+-------------------------------------------------------------------------------
+
+Build a system that does the following:
+
+1. Fetch stock-related news and official corporate events from multiple sources
+2. Normalize all data into one internal structure
+3. Detect what kind of event it is
+4. Map the event to a listed stock symbol
+5. Measure how important the event is
+6. Check whether the market is reacting strongly
+7. Generate alerts and trade candidates
+8. Optionally execute paper trades or live trades
+
+Important principle:
+Do NOT trade directly from raw headlines.
+Trade only when:
+- event is reliable
+- event is relevant
+- stock mapping is correct
+- price reaction confirms the event
+- your setup conditions match
+
+-------------------------------------------------------------------------------
+2. CAN THIS SERVICE BE WRITTEN IN GO?
+-------------------------------------------------------------------------------
+
+Yes.
+
+This service can absolutely be built in Go.
+
+Go is well-suited for:
+- concurrent HTTP polling
+- API integrations
+- schedulers/workers
+- Kafka producers/consumers
+- JSON handling
+- low-latency processing
+- rule-based event classification
+- signal generation
+- alerting systems
+- REST APIs
+- event pipelines
+- scalable microservices
+
+Where Go is weaker:
+- advanced NLP
+- messy HTML scraping compared to Python ecosystem
+- LLM-heavy pipelines
+- complex PDF extraction
+
+Recommended engineering decision:
+- Build version 1 fully in Go
+- If later needed, add Python only for advanced NLP or PDF parsing
+
+-------------------------------------------------------------------------------
+3. BUSINESS PROBLEM THIS SERVICE SOLVES
+-------------------------------------------------------------------------------
+
+This application solves the problem of converting market-relevant information into
+structured, tradeable signals.
+
+Examples:
+- Dividend declared -> track yield surprise, ex-date relevance, reaction
+- Quarterly results announced -> detect result event, measure surprise, confirm with price
+- Negative incident -> detect event, link it to stock, short only if price confirms
+- Sudden event like "stock down by 20%" -> identify if news and price anomaly align
+
+Without such a service:
+- you manually monitor many pages and apps
+- you miss events
+- you react late
+- you confuse rumors with real events
+- you have no consistent structure for event-based trading
+
+-------------------------------------------------------------------------------
+4. EVENT TYPES TO TRACK
+-------------------------------------------------------------------------------
+
+4.1 Dividend-related events
+---------------------------
+Examples:
+- Board meeting to consider dividend
+- Interim dividend declared
+- Final dividend declared
+- Special dividend declared
+- Record date announced
+- Ex-date approaching
+- Dividend revised or cancelled
+
+Internal event types:
+- DIVIDEND_NOTICE
+- DIVIDEND_DECLARED
+- DIVIDEND_RECORD_DATE
+- DIVIDEND_EX_DATE
+- DIVIDEND_PAYOUT_INFO
+
+Keywords:
+- dividend
+- interim dividend
+- final dividend
+- special dividend
+- record date
+- ex-date
+- payout
+
+4.2 Quarterly result-related events
+-----------------------------------
+Examples:
+- Board meeting for financial results
+- Q1 results announced
+- Q2 results announced
+- Result missed expectations
+- Revenue beat
+- Profit miss
+- Margin compression
+- Guidance increase or cut
+
+Internal event types:
+- RESULT_MEETING_NOTICE
+- RESULT_DECLARED
+- RESULT_BEAT
+- RESULT_MISS
+- GUIDANCE_UP
+- GUIDANCE_DOWN
+- MARGIN_BEAT
+- MARGIN_MISS
+
+Keywords:
+- financial results
+- quarterly results
+- quarter ended
+- standalone
+- consolidated
+- PAT
+- EBITDA
+- revenue
+- margins
+- guidance
+
+4.3 Incident / breaking-news events
+-----------------------------------
+Examples:
+- Plant fire
+- SEBI action
+- RBI action
+- Tax raid
+- Court order
+- Fraud allegation
+- Cyberattack
+- Promoter selling
+- CEO resignation
+- Credit downgrade
+- Acquisition or merger
+- Block deal
+- Management commentary
+
+Internal event types:
+- NEGATIVE_INCIDENT
+- POSITIVE_INCIDENT
+- PLANT_FIRE
+- REGULATORY_ACTION
+- FRAUD_ALLEGATION
+- CYBERATTACK
+- CEO_RESIGNATION
+- RATING_DOWNGRADE
+- RATING_UPGRADE
+- MERGER_NEWS
+- ACQUISITION_NEWS
+- PROMOTER_ACTIVITY
+- LARGE_BLOCK_DEAL
+
+Keywords:
+- fire
+- fraud
+- raid
+- resigns
+- steps down
+- cyberattack
+- penalty
+- probe
+- default
+- downgrade
+- upgrade
+- acquires
+- merger
+- block deal
+- stake sale
+
+-------------------------------------------------------------------------------
+5. DATA SOURCES
+-------------------------------------------------------------------------------
+
+The system should use layered sources.
+
+5.1 Structured official sources
+-------------------------------
+Use these for high-trust, official event detection:
+- NSE announcements
+- NSE corporate actions
+- NSE event calendar
+- NSE board meeting notices
+- NSE financial results
+- BSE corporate announcements
+- BSE corporate actions
+- BSE result updates
+
+Use cases:
+- dividends
+- results
+- record dates
+- ex-dates
+- board meeting schedules
+- official company disclosures
+
+5.2 Unstructured external news sources
+--------------------------------------
+Use these for faster, broader incident detection:
+- News APIs
+- RSS feeds
+- financial news websites
+- company IR news pages if needed
+- press release aggregators
+
+Use cases:
+- sudden incidents
+- management changes
+- plant damage
+- legal actions
+- macro-company linked news
+- analyst/rating news
+
+5.3 Market data source
+----------------------
+Use your live market feed to confirm:
+- price change
+- volume spike
+- VWAP relation
+- range break
+- gap move
+- trend continuation or reversal
+- whether the move is already exhausted
+
+-------------------------------------------------------------------------------
+6. KEY PRINCIPLE: PRICE CONFIRMATION IS MANDATORY
+-------------------------------------------------------------------------------
+
+This is not optional.
+
+A headline by itself is not a trade.
+
+Example:
+- Good result but stock falls -> expectations were higher
+- Bad result but stock rises -> bad news already priced in
+- Negative article appears after price already dropped -> late entry risk
+- Rumor spreads -> no reliable confirmation
+
+Therefore, every event must be evaluated with:
+- source reliability
+- duplication count across sources
+- time freshness
+- market reaction
+- volume expansion
+- technical confirmation
+
+-------------------------------------------------------------------------------
+7. TARGET SYSTEM ARCHITECTURE
+-------------------------------------------------------------------------------
+
+Recommended services:
+
+1. news-collector
+2. news-normalizer
+3. event-classifier
+4. symbol-mapper
+5. market-reaction-engine
+6. scoring-engine
+7. signal-engine
+8. alert-service
+9. dashboard-api
+10. optional paper-trade-engine
+11. optional live-trade-engine
+
+-------------------------------------------------------------------------------
+8. DETAILED SERVICE DEFINITIONS
+-------------------------------------------------------------------------------
+
+8.1 news-collector
+------------------
+Responsibility:
+Fetch raw items from all configured sources.
+
+Inputs:
+- source configs
+- polling schedules
+- API keys / cookies / auth if required
+
+Outputs:
+- raw news item events to Kafka
+- raw items stored in DB if needed
+
+Submodules:
+- nse collector
+- bse collector
+- external news collector
+- scheduler
+- deduplicator
+
+Key tasks:
+- call source endpoints
+- parse response
+- capture publish time
+- capture URL
+- store raw text
+- generate dedup hash
+- publish to topic news.raw
+
+8.2 news-normalizer
+-------------------
+Responsibility:
+Convert source-specific payloads into one internal structure.
+
+Inputs:
+- news.raw topic
+
+Outputs:
+- normalized events to news.normalized
+
+Tasks:
+- unify timestamp format
+- clean titles
+- clean summaries
+- standardize fields
+- strip HTML noise
+- map source to common source_type
+- preserve metadata
+
+8.3 event-classifier
+--------------------
+Responsibility:
+Classify normalized content into event types.
+
+Inputs:
+- news.normalized
+
+Outputs:
+- news.classified
+
+Tasks:
+- keyword/rule classification
+- positive / negative / neutral
+- severity score
+- confidence score
+- event-type selection
+- actionability decision
+
+Version 1 approach:
+- use rule-based keyword maps
+- use phrase patterns
+- use source priority
+
+Later:
+- optionally add ML or LLM classifier
+
+8.4 symbol-mapper
+-----------------
+Responsibility:
+Map event/company mention to tradable stock symbol.
+
+Inputs:
+- news.classified
+- symbol master DB
+
+Outputs:
+- mapped stock event
+
+Tasks:
+- map company full name
+- map short name
+- map aliases
+- map ticker symbols
+- resolve ambiguity
+- attach company_name + symbol
+
+Example:
+"HDFC Bank Ltd", "HDFC Bank", "HDFCBANK" -> HDFCBANK
+
+8.5 market-reaction-engine
+--------------------------
+Responsibility:
+Measure price and volume reaction after an event.
+
+Inputs:
+- event stream
+- live tick/candle stream
+- price store / candle store
+
+Outputs:
+- event reaction snapshot
+
+Tasks:
+- compute 1m / 5m / 15m returns
+- compare to index
+- compute volume ratio
+- compute gap from previous close
+- compute VWAP distance
+- compute anomaly score
+- check structure break
+- decide if market confirms event
+
+8.6 scoring-engine
+------------------
+Responsibility:
+Combine event quality and market reaction into a weighted score.
+
+Inputs:
+- classified event
+- reaction snapshot
+
+Outputs:
+- event score
+
+Possible dimensions:
+- source reliability
+- event severity
+- confidence
+- sentiment strength
+- duplication count
+- freshness
+- price confirmation
+- volume confirmation
+
+8.7 signal-engine
+-----------------
+Responsibility:
+Convert scored events into trade ideas.
+
+Possible outputs:
+- IGNORE
+- WATCH
+- LONG_CANDIDATE
+- SHORT_CANDIDATE
+- TRIGGER_LONG
+- TRIGGER_SHORT
+
+Tasks:
+- apply strategy rules
+- generate entry logic
+- assign risk template
+- create trade candidate event
+
+8.8 alert-service
+-----------------
+Responsibility:
+Send actionable alerts.
+
+Channels:
+- Telegram
+- dashboard
+- email
+- Slack
+- mobile notification
+
+Alert example:
+Symbol: ABC
+Event: RESULT_DECLARED
+Bias: LONG_CANDIDATE
+Score: 82
+Reason: Strong result + volume breakout + price above VWAP
+
+8.9 dashboard-api
+-----------------
+Responsibility:
+Provide dashboards and query APIs for:
+- latest events
+- symbol-wise event history
+- event score list
+- signal list
+- reaction metrics
+- audit trail
+
+8.10 paper-trade-engine
+-----------------------
+Responsibility:
+Simulate trade execution for backtesting / forward testing.
+
+8.11 live-trade-engine
+----------------------
+Responsibility:
+Place real orders.
+This should be the final step, not the first.
+
+-------------------------------------------------------------------------------
+9. END-TO-END FLOW
+-------------------------------------------------------------------------------
+
+9.1 Master flow
+---------------
+1. Source fetcher reads latest updates from official sources and news APIs
+2. Raw item is published to Kafka topic news.raw
+3. Normalizer converts it to standard structure
+4. Classifier identifies event type and severity
+5. Symbol mapper links it to correct stock
+6. Storage persists it in DB
+7. Reaction engine checks live market response
+8. Scoring engine combines event + reaction
+9. Signal engine decides long / short / ignore / watch
+10. Alert service sends notification
+11. Optional paper trade or live trade occurs
+
+-------------------------------------------------------------------------------
+10. DETAILED FLOW BY EVENT TYPE
+-------------------------------------------------------------------------------
+
+10.1 Dividend flow
+------------------
+1. collector fetches corporate action / board meeting updates
+2. event says company will consider dividend
+3. classifier marks DIVIDEND_NOTICE
+4. mapper links event to symbol
+5. storage stores notice
+6. later, official declaration arrives
+7. classifier marks DIVIDEND_DECLARED
+8. metadata includes dividend amount and type
+9. yield calculator compares dividend to current stock price
+10. reaction engine checks price behavior
+11. signal engine decides:
+   - ignore
+   - watch
+   - long candidate
+
+Important logic:
+- special dividend is usually more impactful than routine dividend
+- very low yield dividend may not matter
+- ex-date behavior differs from declaration-day behavior
+
+10.2 Quarterly result flow
+--------------------------
+1. collector fetches board meeting notice for results
+2. classifier marks RESULT_MEETING_NOTICE
+3. system stores expected result date
+4. result filing is released
+5. classifier marks RESULT_DECLARED
+6. if text parsing available, extract profit/revenue/margin terms
+7. reaction engine watches first 1m / 5m / 15m market response
+8. scoring engine measures confidence + price confirmation
+9. signal engine decides long candidate / short candidate / ignore
+
+Important logic:
+- actual price reaction matters more than headline optimism
+- results may be "good" but stock may still fall
+- entry should come from structure, not emotion
+
+10.3 Incident flow
+------------------
+1. external news source publishes breaking item
+2. collector receives article
+3. classifier detects incident type
+4. symbol mapper links company to stock
+5. reaction engine checks sudden move
+6. if price + volume confirm, score increases
+7. signal engine generates watch/short/long depending on event nature
+
+Example:
+- fire in plant
+- stock down sharply
+- volume surge
+- no positive clarification
+=> SHORT_CANDIDATE or WATCH_SHORT_BELOW_VWAP
+
+-------------------------------------------------------------------------------
+11. KAFKA DESIGN
+-------------------------------------------------------------------------------
+
+Recommended topics:
+
+Core topics:
+- news.raw
+- news.normalized
+- news.classified
+- events.stock
+- market.reaction
+- signals.news
+- alerts.news
+
+Optional specialized topics:
+- events.dividend
+- events.results
+- events.incident
+
+Simple MVP topic version:
+- news.raw
+- news.processed
+- signals.news
+
+Message key recommendation:
+- use symbol as partition key when symbol is available
+- before symbol mapping, use source-specific stable hash
+
+Benefits:
+- order preserved per symbol
+- easy downstream consumption
+- scalable partitioning
+
+-------------------------------------------------------------------------------
+12. DATABASE DESIGN
+-------------------------------------------------------------------------------
+
+12.1 Table: news_items
+----------------------
+Purpose:
+Store raw and normalized news items for audit and deduplication.
+
+Suggested columns:
+- id
+- source
+- source_type
+- external_id
+- title
+- summary
+- body
+- url
+- published_at
+- fetched_at
+- dedup_hash
+- raw_company_name
+- raw_symbol
+- normalized_payload_json
+- created_at
+
+12.2 Table: stock_events
+------------------------
+Purpose:
+Store classified stock-linked events.
+
+Suggested columns:
+- event_id
+- news_item_id
+- symbol
+- company_name
+- event_type
+- sentiment
+- severity
+- confidence
+- actionability
+- source
+- source_type
+- published_at
+- event_date
+- record_date
+- ex_date
+- metadata_json
+- created_at
+- updated_at
+
+12.3 Table: market_reaction
+---------------------------
+Purpose:
+Store reaction stats for each event.
+
+Suggested columns:
+- id
+- event_id
+- symbol
+- price_change_1m
+- price_change_5m
+- price_change_15m
+- volume_ratio_1m
+- volume_ratio_5m
+- gap_pct
+- vwap_distance
+- anomaly_score
+- benchmark_relative_move
+- snapshot_time
+- created_at
+
+12.4 Table: event_scores
+------------------------
+Purpose:
+Store weighted scores.
+
+Suggested columns:
+- id
+- event_id
+- symbol
+- source_score
+- severity_score
+- confidence_score
+- sentiment_score
+- freshness_score
+- price_confirmation_score
+- volume_confirmation_score
+- final_score
+- created_at
+
+12.5 Table: event_signals
+-------------------------
+Purpose:
+Store trading decisions.
+
+Suggested columns:
+- signal_id
+- event_id
+- symbol
+- signal_type
+- strategy_name
+- status
+- entry_reason
+- risk_template
+- score
+- created_at
+- updated_at
+
+12.6 Table: event_alerts
+------------------------
+Purpose:
+Track alerts sent.
+
+Suggested columns:
+- id
+- event_id
+- signal_id
+- channel
+- recipient
+- status
+- sent_at
+- payload_json
+
+-------------------------------------------------------------------------------
+13. REDIS USAGE
+-------------------------------------------------------------------------------
+
+Use Redis for:
+- latest event cache per symbol
+- latest signal cache per symbol
+- dedup recent hashes
+- recent article titles
+- latest reaction snapshot
+- quick dashboard lookup
+- rate limiting / locks if needed
+
+Recommended keys:
+- latest:event:{symbol}
+- latest:signal:{symbol}
+- dedup:hash:{hash}
+- reaction:{event_id}
+
+-------------------------------------------------------------------------------
+14. EVENT NORMALIZATION FORMAT
+-------------------------------------------------------------------------------
+
+Example internal event JSON:
+
+{
+  "event_id": "evt_abc123",
+  "source": "NSE",
+  "source_type": "official_exchange",
+  "symbol": "HDFCBANK",
+  "company_name": "HDFC Bank Ltd",
+  "event_type": "DIVIDEND_DECLARED",
+  "title": "Board recommends final dividend",
+  "summary": "Board recommended final dividend of Rs 22 per share",
+  "published_at": "2026-03-25T10:14:00+05:30",
+  "event_date": "2026-03-25",
+  "record_date": "2026-05-10",
+  "ex_date": "2026-05-09",
+  "severity": 4,
+  "confidence": 0.98,
+  "sentiment": "positive",
+  "raw_url": "https://source-url",
+  "metadata": {
+    "dividend_amount": 22,
+    "dividend_type": "final"
+  }
+}
+
+-------------------------------------------------------------------------------
+15. SIGNAL TYPES
+-------------------------------------------------------------------------------
+
+Recommended signal types:
+- IGNORE
+- WATCH
+- LONG_CANDIDATE
+- SHORT_CANDIDATE
+- TRIGGER_LONG
+- TRIGGER_SHORT
+- INVALIDATED
+
+Signal status lifecycle:
+- CREATED
+- ACTIVE
+- TRIGGERED
+- EXPIRED
+- CANCELLED
+- EXECUTED
+- FAILED
+
+-------------------------------------------------------------------------------
+16. SCORING MODEL
+-------------------------------------------------------------------------------
+
+Example scoring dimensions:
+- source reliability
+- event severity
+- confidence
+- freshness
+- duplication count
+- market reaction
+- volume spike
+- trend alignment
+- index-relative performance
+
+Example conceptual formula:
+
+final_score =
+    source_reliability_score * 0.20
+  + severity_score           * 0.15
+  + confidence_score         * 0.10
+  + freshness_score          * 0.10
+  + price_confirmation_score * 0.20
+  + volume_confirmation_score* 0.10
+  + sentiment_strength_score * 0.05
+  + structure_score          * 0.10
+
+This is not fixed.
+You should tune it after observing market behavior.
+
+-------------------------------------------------------------------------------
+17. STRATEGY LOGIC EXAMPLES
+-------------------------------------------------------------------------------
+
+17.1 Dividend strategy
+----------------------
+Possible logic:
+- only consider official declarations
+- special dividend preferred over routine small dividend
+- ignore low-yield/no-surprise dividend
+- require price strength above VWAP after event
+- trade only if there is intraday structure confirmation
+
+17.2 Quarterly result strategy
+------------------------------
+Possible logic:
+- event must be official
+- result should show strong market response
+- trade breakout above first 5m/15m structure for positive event
+- trade breakdown below first 5m/15m structure for negative event
+- avoid if move is already exhausted
+
+17.3 Incident short strategy
+----------------------------
+Possible logic:
+- negative incident severity high
+- trusted or repeated sources
+- stock below VWAP
+- price breaks intraday support
+- no quick reversal after event
+- avoid if near lower circuit / illiquid / spread too wide
+
+-------------------------------------------------------------------------------
+18. TIME SCHEDULING DESIGN
+-------------------------------------------------------------------------------
+
+Not all sources need same frequency.
+
+Recommended polling intervals:
+
+Fast:
+- external breaking-news APIs: every 10 to 30 seconds
+
+Medium:
+- exchange announcements during market hours: every 30 to 60 seconds
+
+Slow:
+- dividend schedules / event calendars: every 5 to 15 minutes
+
+Very slow:
+- static metadata refresh: every few hours or daily
+
+Important:
+Do not hammer every endpoint every second.
+That is wasteful and may get you blocked.
+
+-------------------------------------------------------------------------------
+19. DEDUPLICATION DESIGN
+-------------------------------------------------------------------------------
+
+Deduplication is critical.
+
+Problems without dedup:
+- same article from multiple fetch cycles
+- same filing updated repeatedly
+- duplicated alerts
+- repeated signals
+
+Dedup keys:
+- source + external_id
+- normalized title hash
+- title + published_at hash
+- url hash
+
+Recommended recent dedup storage:
+- Redis for short-term
+- DB for long-term audit
+
+-------------------------------------------------------------------------------
+20. SYMBOL MAPPING DESIGN
+-------------------------------------------------------------------------------
+
+You need a symbol master.
+
+Suggested fields:
+- symbol
+- exchange
+- company_name
+- short_name
+- aliases
+- ISIN
+- sector
+- industry
+
+Mapping rules:
+1. exact symbol match
+2. exact company full-name match
+3. alias match
+4. fuzzy match if needed
+5. reject ambiguous mapping when confidence low
+
+Important:
+Bad symbol mapping will destroy the system.
+This part must be clean.
+
+-------------------------------------------------------------------------------
+21. PRICE REACTION ENGINE DESIGN
+-------------------------------------------------------------------------------
+
+The market-reaction engine should consume:
+- live tick stream or candles
+- stock event stream
+
+It should compute:
+- return after 1m / 5m / 15m from event time
+- volume expansion ratio
+- distance from VWAP
+- opening gap relevance
+- range break
+- relative move vs index or sector
+- candle strength
+
+Possible output fields:
+- event_id
+- symbol
+- reaction_window
+- price_return
+- volume_ratio
+- vwap_relation
+- anomaly_score
+- technical_state
+
+-------------------------------------------------------------------------------
+22. API DESIGN
+-------------------------------------------------------------------------------
+
+Recommended REST APIs:
+
+GET /health
+GET /events/latest
+GET /events/symbol/{symbol}
+GET /signals/latest
+GET /signals/symbol/{symbol}
+GET /reaction/{event_id}
+GET /news/raw/{id}
+POST /admin/reload-symbol-master
+POST /admin/reprocess/event/{event_id}
+
+Dashboard use cases:
+- latest dividend events
+- latest result events
+- latest incident events
+- all current signals
+- all alerts by day
+- symbol-level event timeline
+
+-------------------------------------------------------------------------------
+23. ALERT FORMAT DESIGN
+-------------------------------------------------------------------------------
+
+Telegram alert example:
+
+[NEWS SIGNAL]
+Symbol: HDFCBANK
+Event: RESULT_DECLARED
+Sentiment: Positive
+Score: 83
+Reaction: +2.7% in 5m, volume 3.2x, above VWAP
+Signal: LONG_CANDIDATE
+Reason: Official result + strong market confirmation
+
+Short alert example:
+
+[NEWS SIGNAL]
+Symbol: XYZ
+Event: NEGATIVE_INCIDENT
+Sentiment: Negative
+Score: 79
+Reaction: -4.8% in 10m, volume 4.9x, below VWAP
+Signal: WATCH_SHORT_BELOW_SUPPORT
+Reason: negative event + price breakdown
+
+-------------------------------------------------------------------------------
+24. PROJECT FOLDER STRUCTURE IN GO
+-------------------------------------------------------------------------------
+
+news_service/
+├── cmd/
+│   └── news_service/
+│       └── main.go
+├── config/
+│   ├── config.yaml
+│   └── sources.yaml
+├── internal/
+│   ├── app/
+│   │   └── app.go
+│   ├── config/
+│   │   └── config.go
+│   ├── logger/
+│   │   └── logger.go
+│   ├── models/
+│   │   ├── news_item.go
+│   │   ├── stock_event.go
+│   │   ├── market_reaction.go
+│   │   ├── event_score.go
+│   │   └── signal.go
+│   ├── collector/
+│   │   ├── scheduler.go
+│   │   ├── nse_collector.go
+│   │   ├── bse_collector.go
+│   │   ├── external_news_collector.go
+│   │   └── collector_manager.go
+│   ├── normalizer/
+│   │   └── normalizer.go
+│   ├── classifier/
+│   │   ├── rules.go
+│   │   ├── classifier.go
+│   │   └── severity.go
+│   ├── mapper/
+│   │   ├── symbol_mapper.go
+│   │   └── alias_store.go
+│   ├── reaction/
+│   │   └── market_reaction.go
+│   ├── scoring/
+│   │   └── scoring_engine.go
+│   ├── signal/
+│   │   └── signal_engine.go
+│   ├── kafka/
+│   │   ├── producer.go
+│   │   ├── consumer.go
+│   │   └── topics.go
+│   ├── storage/
+│   │   ├── postgres.go
+│   │   ├── redis.go
+│   │   └── repositories/
+│   │       ├── news_repo.go
+│   │       ├── event_repo.go
+│   │       ├── score_repo.go
+│   │       └── signal_repo.go
+│   ├── alert/
+│   │   ├── telegram.go
+│   │   └── formatter.go
+│   ├── api/
+│   │   ├── server.go
+│   │   ├── routes.go
+│   │   └── handlers.go
+│   └── util/
+│       ├── hash.go
+│       ├── time.go
+│       └── strings.go
+├── scripts/
+│   ├── run.sh
+│   └── build.sh
+├── deployments/
+│   ├── docker/
+│   └── systemd/
+└── README.md
+
+-------------------------------------------------------------------------------
+25. CONFIG DESIGN
+-------------------------------------------------------------------------------
+
+Main config should include:
+- app name
+- environment
+- log level
+- postgres config
+- redis config
+- kafka config
+- source configs
+- scheduler intervals
+- alert configs
+- strategy configs
+
+Example config sections:
+- app
+- kafka
+- db
+- redis
+- nse
+- bse
+- news_api
+- schedule
+- alerts
+- scoring
+- signal_rules
+
+-------------------------------------------------------------------------------
+26. SIGNAL RULE ENGINE DESIGN
+-------------------------------------------------------------------------------
+
+The signal engine should use configurable rules.
+
+Example rules:
+- dividend_min_yield
+- result_min_score
+- negative_incident_min_score
+- min_volume_ratio
+- min_price_move_5m
+- must_be_above_vwap_for_long
+- must_be_below_vwap_for_short
+
+Reason:
+You should not hardcode everything deep inside logic.
+Trading rules change.
+
+-------------------------------------------------------------------------------
+27. OBSERVABILITY AND MONITORING
+-------------------------------------------------------------------------------
+
+Track these metrics:
+- source fetch success/failure count
+- source latency
+- news items fetched per source
+- normalized events count
+- classification count by type
+- symbol mapping failure count
+- signals generated count
+- alerts sent count
+- DB insert failure count
+- Kafka lag
+- reaction computation lag
+
+Use:
+- Prometheus
+- Grafana
+- logs
+- alerting rules
+
+Critical alerts:
+- no data from source
+- collector continuously failing
+- Kafka publish failures
+- DB unavailable
+- symbol mapping failure rate high
+- zero events during market hours unexpectedly
+
+-------------------------------------------------------------------------------
+28. SECURITY AND SAFETY
+-------------------------------------------------------------------------------
+
+Protect:
+- API keys
+- webhook tokens
+- DB credentials
+- broker credentials
+- source cookies if required
+
+Use:
+- env vars / vault / secrets file
+- encrypted storage
+- strict logging (never dump secrets)
+- IP restrictions if needed
+- RBAC for admin APIs
+
+Trading safety:
+- keep live-trading disabled until thoroughly tested
+- default to alert/paper mode
+- add max daily signal limits
+- add max risk per trade
+- add kill switch
+
+-------------------------------------------------------------------------------
+29. MVP ROADMAP
+-------------------------------------------------------------------------------
+
+Phase 1 - Structured event engine
+---------------------------------
+Build:
+- NSE collector
+- BSE collector
+- event normalizer
+- dividend/result classifier
+- symbol mapping
+- Postgres storage
+- Telegram alerts
+- basic dashboard API
+
+Goal:
+Get reliable structured event visibility.
+
+Phase 2 - Incident engine
+-------------------------
+Add:
+- external news sources
+- incident classifier
+- dedup improvements
+- reaction engine
+
+Goal:
+Detect market-moving news events beyond exchange filings.
+
+Phase 3 - Scoring and signal engine
+-----------------------------------
+Add:
+- weighted scoring
+- long/short candidate signals
+- event dashboards
+- historical study support
+
+Goal:
+Convert events into filtered trade candidates.
+
+Phase 4 - Paper trading
+-----------------------
+Add:
+- entry logic
+- simulated trades
+- signal outcome tracking
+- daily review reports
+
+Goal:
+Measure whether strategy works.
+
+Phase 5 - Live trading
+----------------------
+Add:
+- broker execution integration
+- risk controls
+- kill switch
+- order monitoring
+
+Goal:
+Controlled real deployment.
+
+-------------------------------------------------------------------------------
+30. WHY THIS ORDER MATTERS
+-------------------------------------------------------------------------------
+
+Wrong order:
+- build auto-trading first
+- then figure out if event quality is good
+- then realize source mapping and reaction logic are weak
+- lose money
+
+Correct order:
+1. collect
+2. normalize
+3. classify
+4. map
+5. react
+6. score
+7. alert
+8. paper trade
+9. live trade
+
+This is the sane path.
+
+-------------------------------------------------------------------------------
+31. RISKS AND CHALLENGES
+-------------------------------------------------------------------------------
+
+Main technical risks:
+- source instability
+- anti-bot protections
+- HTML changes in websites
+- duplicate content
+- incorrect symbol mapping
+- late news
+- low-quality news sources
+- overfitting event rules
+- false positives
+- market reaction happening before your fetch time
+- too many noisy alerts
+
+Main trading risks:
+- event already priced in
+- wrong interpretation of headline
+- price reversal after initial move
+- illiquid names
+- circuit risk
+- fake/rumor articles
+- expectation mismatch during results
+
+-------------------------------------------------------------------------------
+32. WHAT MAKES THIS SYSTEM USEFUL
+-------------------------------------------------------------------------------
+
+This system becomes genuinely useful when it can answer:
+
+- What just happened?
+- Is it official or rumor-based?
+- Which stock is affected?
+- Is it positive or negative?
+- How severe is it?
+- Is the stock actually reacting?
+- Is the move strong enough to trade?
+- Should I ignore, watch, or trade?
+
+If it cannot answer these properly, it is just a noisy news scraper.
+
+-------------------------------------------------------------------------------
+33. FINAL RECOMMENDATION
+-------------------------------------------------------------------------------
+
+Build version 1 in Go.
+
+Do not overcomplicate it with AI from day one.
+
+Start with:
+- official dividend and result events
+- strong normalization
+- clean symbol mapping
+- market reaction confirmation
+- alerts only
+
+Then add:
+- incident detection
+- scoring
+- paper trading
+- real trading
+
+The edge is not in collecting headlines.
+The edge is in structured event detection plus reaction confirmation plus disciplined rules.
+
+-------------------------------------------------------------------------------
+34. SHORT IMPLEMENTATION SUMMARY
+-------------------------------------------------------------------------------
+
+Best starting stack:
+- Go for services
+- Kafka for event transport
+- Postgres for persistence
+- Redis for cache/dedup
+- Prometheus/Grafana for monitoring
+- Telegram for alerts
+- Optional dashboard API in Go
+
+First build:
+- collector
+- normalizer
+- classifier
+- mapper
+- storage
+- alert
+
+Then build:
+- reaction
+- scoring
+- signal engine
+- paper trading
+
+End of document.

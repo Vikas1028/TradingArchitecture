@@ -1,0 +1,8 @@
+{
+  "enable": true,
+  "level": "DEBUG",
+  "format": "json",
+  "log_dir": "logs",
+  "file_name": "go_ltp.log",
+  "console": true
+}

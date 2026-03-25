@@ -1,9 +1,9 @@
 package engine
 
 import (
-	"errors"
 	"fmt"
 	"math"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -70,47 +70,39 @@ func (e *Engine) CheckAndResetDayIfNeeded(now time.Time) {
 	if y1 == y2 && m1 == m2 && d1 == d2 {
 		return
 	}
+	currentDay := time.Date(y1, m1, d1, 0, 0, 0, 0, e.state.Tz)
+	incomingDay := time.Date(y2, m2, d2, 0, 0, 0, 0, e.state.Tz)
+	if incomingDay.Before(currentDay) {
+		e.logger.Warn(
+			"ignoring out-of-order message from older trading day",
+			zap.Time("current_date", e.state.Daily.Date),
+			zap.Time("incoming_date", nowInTz),
+		)
+		return
+	}
 	e.logger.Info("new trading day detected; resetting state", zap.Time("prev_date", e.state.Daily.Date), zap.Time("new_date", nowInTz))
 	e.state.Positions = make(map[string]*Position)
 	e.state.LatestCandles = make(map[string]*Candle)
+	e.state.LatestPrices = make(map[string]float64)
+	e.state.LastPriceTimes = make(map[string]time.Time)
 	e.state.PendingSignals = make(map[string]*PendingSignal)
 	e.state.Daily = DailyState{Date: nowInTz}
-	metrics.TradingHalted.Set(0)
+	e.syncMetrics()
 }
 
 // OnSignal processes a new StrategySignal and may open a new paper position.
-// Inputs: StrategySignal, latest candle (may be nil).
+// Inputs: StrategySignal, entry price.
 // Outputs: *TradeEvent (entry) or nil, and error if validation fails.
-func (e *Engine) OnSignal(sig StrategySignal, latest *Candle) (*TradeEvent, error) {
+func (e *Engine) OnSignal(sig StrategySignal, entryPrice float64) (*TradeEvent, error) {
 	symbol := strings.ToUpper(sig.Symbol)
 	sigTime := sig.Time.In(e.state.Tz)
 	e.CheckAndResetDayIfNeeded(sigTime)
 
-	if e.state.Daily.TradingHalted {
-		return nil, nil
-	}
-	if sig.Side != SideBuy {
-		return nil, nil
-	}
-	if !e.IsWithinEntryWindow(sigTime) {
-		return nil, nil
-	}
-	if len(e.state.Positions) >= e.state.Risk.MaxOpenPositions {
-		return nil, nil
-	}
-	if e.state.Daily.TradesToday >= e.state.Risk.MaxTradesPerDay {
-		return nil, nil
-	}
 	if _, exists := e.state.Positions[symbol]; exists {
 		return nil, nil
 	}
-	if latest == nil || latest.Symbol != symbol {
-		return nil, errors.New("no latest candle for symbol to price entry")
-	}
-
-	entryPrice := latest.Close
 	if entryPrice <= 0 {
-		return nil, errors.New("invalid entry price")
+		return nil, fmt.Errorf("invalid entry price")
 	}
 	qty := int64(math.Floor(e.state.Risk.CapitalPerTrade / entryPrice))
 	if qty <= 0 {
@@ -122,9 +114,22 @@ func (e *Engine) OnSignal(sig StrategySignal, latest *Candle) (*TradeEvent, erro
 		return nil, nil
 	}
 
+	posSide := SideLong
+	tradeSide := string(SideLong)
+	switch sig.Side {
+	case SideBuy:
+		posSide = SideLong
+		tradeSide = string(SideLong)
+	case SideSell:
+		posSide = SideShort
+		tradeSide = string(SideShort)
+	default:
+		return nil, nil
+	}
+
 	pos := &Position{
 		Symbol:    symbol,
-		Side:      SideLong,
+		Side:      posSide,
 		Quantity:  qty,
 		AvgEntry:  entryPrice,
 		EntryTime: sigTime,
@@ -132,6 +137,7 @@ func (e *Engine) OnSignal(sig StrategySignal, latest *Candle) (*TradeEvent, erro
 	}
 	e.state.Positions[symbol] = pos
 	e.state.Daily.TradesToday++
+	e.syncMetrics()
 
 	trade := &TradeEvent{
 		Symbol:     symbol,
@@ -139,7 +145,7 @@ func (e *Engine) OnSignal(sig StrategySignal, latest *Candle) (*TradeEvent, erro
 		Price:      entryPrice,
 		Quantity:   qty,
 		TradeType:  TradeEntry,
-		Side:       string(SideLong),
+		Side:       tradeSide,
 		Strategy:   sig.Strategy,
 		SignalTime: sigTime,
 		Reason:     "ENTRY_FROM_SIGNAL",
@@ -156,6 +162,7 @@ func (e *Engine) QueueSignal(sig StrategySignal, now time.Time) {
 		Signal:   copySig,
 		QueuedAt: now.In(e.state.Tz),
 	}
+	e.syncMetrics()
 }
 
 // ConsumePendingSignal returns and removes a queued signal for the symbol if present.
@@ -164,6 +171,7 @@ func (e *Engine) ConsumePendingSignal(symbol string) *StrategySignal {
 	pending := e.state.PendingSignals[symbol]
 	if pending != nil {
 		delete(e.state.PendingSignals, symbol)
+		e.syncMetrics()
 		return &pending.Signal
 	}
 	return nil
@@ -182,6 +190,9 @@ func (e *Engine) DrainExpiredPendingSignals(now time.Time, maxAge time.Duration)
 			delete(e.state.PendingSignals, symbol)
 		}
 	}
+	if len(expired) > 0 {
+		e.syncMetrics()
+	}
 	return expired
 }
 
@@ -197,27 +208,44 @@ func (e *Engine) OnCandle(c Candle) ([]TradeEvent, error) {
 	events := make([]TradeEvent, 0)
 	pos, ok := e.state.Positions[c.Symbol]
 	if ok {
-		slPrice := pos.AvgEntry * (1 - e.state.Risk.PerTradeSLPct/100)
-		targetPrice := pos.AvgEntry * (1 + e.state.Risk.PerTradeTargetPct/100)
-
-		hitSL := c.Low <= slPrice
-		hitTP := c.High >= targetPrice
-
 		exitPrice := 0.0
 		reason := ""
-		if hitSL {
-			exitPrice = slPrice
-			reason = "EXIT_SL_HIT"
-		} else if hitTP {
-			exitPrice = targetPrice
-			reason = "EXIT_TARGET_HIT"
-		} else if e.IsAfterEODFlatTime(now) {
-			exitPrice = c.Close
-			reason = "EXIT_EOD"
+
+		switch pos.Side {
+		case SideLong:
+			slPrice := pos.AvgEntry * (1 - e.state.Risk.PerTradeSLPct/100)
+			targetPrice := pos.AvgEntry * (1 + e.state.Risk.PerTradeTargetPct/100)
+			hitSL := c.Low <= slPrice
+			hitTP := c.High >= targetPrice
+			if hitSL {
+				exitPrice = slPrice
+				reason = "EXIT_SL_HIT"
+			} else if hitTP {
+				exitPrice = targetPrice
+				reason = "EXIT_TARGET_HIT"
+			} else if e.IsAfterEODFlatTime(now) {
+				exitPrice = c.Close
+				reason = "EXIT_EOD"
+			}
+		case SideShort:
+			slPrice := pos.AvgEntry * (1 + e.state.Risk.PerTradeSLPct/100)
+			targetPrice := pos.AvgEntry * (1 - e.state.Risk.PerTradeTargetPct/100)
+			hitSL := c.High >= slPrice
+			hitTP := c.Low <= targetPrice
+			if hitSL {
+				exitPrice = slPrice
+				reason = "EXIT_SL_HIT"
+			} else if hitTP {
+				exitPrice = targetPrice
+				reason = "EXIT_TARGET_HIT"
+			} else if e.IsAfterEODFlatTime(now) {
+				exitPrice = c.Close
+				reason = "EXIT_EOD"
+			}
 		}
 
 		if exitPrice > 0 {
-			realized := (exitPrice - pos.AvgEntry) * float64(pos.Quantity)
+			realized := pnlForSide(pos.Side, pos.AvgEntry, exitPrice, pos.Quantity)
 			prevPeak := e.state.Daily.PeakPnl
 			e.state.Daily.RealizedPnl += realized
 			if e.state.Daily.RealizedPnl > e.state.Daily.PeakPnl {
@@ -228,6 +256,7 @@ func (e *Engine) OnCandle(c Candle) ([]TradeEvent, error) {
 				e.state.Daily.MaxDrawdown = drawdown
 			}
 			delete(e.state.Positions, c.Symbol)
+			e.syncMetrics()
 
 			events = append(events, TradeEvent{
 				Symbol:      c.Symbol,
@@ -245,20 +274,9 @@ func (e *Engine) OnCandle(c Candle) ([]TradeEvent, error) {
 	}
 
 	// Update unrealized PnL across positions.
-	unreal := 0.0
-	for sym, p := range e.state.Positions {
-		last := e.state.LatestCandles[sym]
-		if last == nil {
-			continue
-		}
-		unreal += (last.Close - p.AvgEntry) * float64(p.Quantity)
-	}
-	e.state.Daily.UnrealizedPnl = unreal
+	e.recomputeUnrealized()
 
-	if e.state.Daily.RealizedPnl <= -e.state.Risk.MaxDailyLoss {
-		e.state.Daily.TradingHalted = true
-		metrics.TradingHalted.Set(1)
-	}
+	e.syncMetrics()
 
 	return events, nil
 }
@@ -266,6 +284,7 @@ func (e *Engine) OnCandle(c Candle) ([]TradeEvent, error) {
 // BuildPnlSnapshot builds a PnlSnapshot from current engine state at given time.
 // Inputs: time.Time; Outputs: PnlSnapshot.
 func (e *Engine) BuildPnlSnapshot(now time.Time) PnlSnapshot {
+	e.syncMetrics()
 	return PnlSnapshot{
 		Time:              now,
 		RealizedPnl:       e.state.Daily.RealizedPnl,
@@ -278,6 +297,78 @@ func (e *Engine) BuildPnlSnapshot(now time.Time) PnlSnapshot {
 	}
 }
 
+// OpenSymbols returns the set of currently restored or live open position symbols.
+func (e *Engine) OpenSymbols() []string {
+	out := make([]string, 0, len(e.state.Positions))
+	for symbol := range e.state.Positions {
+		out = append(out, symbol)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// RestoreTradeHistory rebuilds today's open positions and realized PnL from prior trade events.
+func (e *Engine) RestoreTradeHistory(events []TradeEvent, now time.Time) {
+	e.CheckAndResetDayIfNeeded(now)
+	if len(events) == 0 {
+		return
+	}
+	sort.Slice(events, func(i, j int) bool {
+		return events[i].Time.Before(events[j].Time)
+	})
+	for _, event := range events {
+		symbol := strings.ToUpper(strings.TrimSpace(event.Symbol))
+		if symbol == "" {
+			continue
+		}
+		switch event.TradeType {
+		case TradeEntry:
+			side := SideLong
+			if strings.EqualFold(event.Side, string(SideShort)) {
+				side = SideShort
+			}
+			e.state.Positions[symbol] = &Position{
+				Symbol:    symbol,
+				Side:      side,
+				Quantity:  event.Quantity,
+				AvgEntry:  event.Price,
+				EntryTime: event.SignalTime,
+				Strategy:  event.Strategy,
+			}
+			e.state.Daily.TradesToday++
+		case TradeExit:
+			delete(e.state.Positions, symbol)
+			e.state.Daily.RealizedPnl += event.RealizedPnl
+			if e.state.Daily.RealizedPnl > e.state.Daily.PeakPnl {
+				e.state.Daily.PeakPnl = e.state.Daily.RealizedPnl
+			}
+			drawdown := e.state.Daily.RealizedPnl - e.state.Daily.PeakPnl
+			if drawdown < e.state.Daily.MaxDrawdown {
+				e.state.Daily.MaxDrawdown = drawdown
+			}
+		}
+	}
+	e.recomputeUnrealized()
+	e.syncMetrics()
+}
+
+func (e *Engine) syncMetrics() {
+	metrics.TradingHalted.Set(boolToFloat(e.state.Daily.TradingHalted))
+	metrics.RealizedPnl.Set(e.state.Daily.RealizedPnl)
+	metrics.UnrealizedPnl.Set(e.state.Daily.UnrealizedPnl)
+	metrics.OpenPositions.Set(float64(len(e.state.Positions)))
+	metrics.PendingSignals.Set(float64(len(e.state.PendingSignals)))
+	metrics.TradesToday.Set(float64(e.state.Daily.TradesToday))
+	metrics.MaxDrawdown.Set(e.state.Daily.MaxDrawdown)
+}
+
+func boolToFloat(value bool) float64 {
+	if value {
+		return 1
+	}
+	return 0
+}
+
 // UpdateLatestCandle stores the latest candle for a symbol for entry pricing.
 // Inputs: Candle; Outputs: none.
 func (e *Engine) UpdateLatestCandle(c Candle) {
@@ -285,10 +376,89 @@ func (e *Engine) UpdateLatestCandle(c Candle) {
 	e.state.LatestCandles[c.Symbol] = &c
 }
 
+// OnTick updates the latest live price, mark-to-market PnL, and may release a pending signal.
+func (e *Engine) OnTick(t Tick) (*TradeEvent, error) {
+	t.Symbol = strings.ToUpper(t.Symbol)
+	if t.Symbol == "" || t.LTP <= 0 {
+		return nil, nil
+	}
+	e.CheckAndResetDayIfNeeded(t.Time.In(e.state.Tz))
+	e.state.LatestPrices[t.Symbol] = t.LTP
+	if !t.Time.IsZero() {
+		e.state.LastPriceTimes[t.Symbol] = t.Time
+	}
+	e.recomputeUnrealized()
+	e.syncMetrics()
+	if pending := e.ConsumePendingSignal(t.Symbol); pending != nil {
+		return e.OnSignal(*pending, t.LTP)
+	}
+	return nil, nil
+}
+
+// GetLatestPriceForSymbol returns the cached last-traded price for a symbol.
+func (e *Engine) GetLatestPriceForSymbol(symbol string) (float64, bool) {
+	value, ok := e.state.LatestPrices[strings.ToUpper(symbol)]
+	return value, ok && value > 0
+}
+
 // GetLatestCandleForSymbol returns the cached latest candle for a symbol.
 // Inputs: symbol string; Outputs: *Candle or nil.
 func (e *Engine) GetLatestCandleForSymbol(symbol string) *Candle {
 	return e.state.LatestCandles[strings.ToUpper(symbol)]
+}
+
+// BuildRunningTrades returns the current open positions enriched with live MTM.
+func (e *Engine) BuildRunningTrades() []RunningTrade {
+	rows := make([]RunningTrade, 0, len(e.state.Positions))
+	for symbol, pos := range e.state.Positions {
+		lastPrice := e.state.LatestPrices[symbol]
+		if lastPrice <= 0 {
+			if candle := e.state.LatestCandles[symbol]; candle != nil {
+				lastPrice = candle.Close
+			}
+		}
+		if lastPrice <= 0 {
+			lastPrice = pos.AvgEntry
+		}
+		rows = append(rows, RunningTrade{
+			Symbol:        symbol,
+			Strategy:      pos.Strategy,
+			Side:          string(pos.Side),
+			Quantity:      pos.Quantity,
+			EntryPrice:    pos.AvgEntry,
+			LastPrice:     lastPrice,
+			UnrealizedPnl: pnlForSide(pos.Side, pos.AvgEntry, lastPrice, pos.Quantity),
+			EntryTime:     pos.EntryTime,
+			LastTickTime:  e.state.LastPriceTimes[symbol],
+		})
+	}
+	return rows
+}
+
+func (e *Engine) recomputeUnrealized() {
+	unreal := 0.0
+	for sym, p := range e.state.Positions {
+		lastPrice := e.state.LatestPrices[sym]
+		if lastPrice <= 0 {
+			last := e.state.LatestCandles[sym]
+			if last == nil {
+				lastPrice = p.AvgEntry
+			} else {
+				lastPrice = last.Close
+			}
+		}
+		unreal += pnlForSide(p.Side, p.AvgEntry, lastPrice, p.Quantity)
+	}
+	e.state.Daily.UnrealizedPnl = unreal
+}
+
+func pnlForSide(side PositionSide, entryPrice, lastPrice float64, qty int64) float64 {
+	switch side {
+	case SideShort:
+		return (entryPrice - lastPrice) * float64(qty)
+	default:
+		return (lastPrice - entryPrice) * float64(qty)
+	}
 }
 
 func parseHHMM(value string) (time.Duration, error) {

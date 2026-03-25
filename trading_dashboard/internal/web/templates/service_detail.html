@@ -1,0 +1,666 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{{.PageTitle}} - {{.ServiceID}}</title>
+  <style>
+    :root {
+      --bg: #f5efe6;
+      --panel: rgba(255,255,255,0.8);
+      --ink: #201b16;
+      --muted: #71675d;
+      --good: #15673d;
+      --bad: #b03d2f;
+      --line: rgba(32, 27, 22, 0.09);
+      --shadow: 0 18px 36px rgba(50, 36, 23, 0.12);
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: Georgia, "Times New Roman", serif; color: var(--ink); background: linear-gradient(180deg, #f8f3ec 0%, #eee5d6 100%); }
+    .shell { max-width: 1400px; margin: 0 auto; padding: 24px; }
+    .nav, .stats, .tables, .summary-grid, .token-grid { display: grid; gap: 16px; }
+    .nav { grid-template-columns: 1fr auto auto; align-items: center; margin-bottom: 18px; }
+    .stats { grid-template-columns: repeat(4, minmax(0, 1fr)); margin-bottom: 18px; }
+    .summary-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); margin-bottom: 18px; }
+    .go-feed-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+    .tables { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .chart-panel { margin-bottom: 18px; }
+    .token-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+    .price-table-wrap { overflow-x: auto; }
+    .price-table th, .price-table td { padding: 10px 12px; white-space: nowrap; }
+    .price-cell { display: flex; flex-direction: column; gap: 4px; }
+    .price-value { font-weight: 700; }
+    .price-time { color: var(--muted); font-size: 0.85rem; }
+    .trade-table-wrap { overflow-x: auto; }
+    .trade-table th, .trade-table td { padding: 10px 12px; white-space: nowrap; }
+    .pnl-positive { color: var(--good); font-weight: 700; }
+    .pnl-negative { color: var(--bad); font-weight: 700; }
+    .brand { font-size: 2rem; margin: 0; letter-spacing: -0.04em; }
+    .link { text-decoration: none; color: var(--ink); padding: 12px 16px; border-radius: 999px; background: rgba(32,27,22,0.06); }
+    .control-row { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 12px; }
+    .action-btn { border: 0; border-radius: 999px; padding: 10px 16px; font: inherit; cursor: pointer; background: rgba(32,27,22,0.08); color: var(--ink); }
+    .action-btn:disabled { cursor: not-allowed; opacity: 0.45; }
+    .panel { background: var(--panel); border-radius: 22px; box-shadow: var(--shadow); padding: 20px; }
+    .eyebrow { font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.12em; color: var(--muted); margin-bottom: 10px; }
+    .big { font-size: 2rem; font-weight: 700; letter-spacing: -0.04em; }
+    .badge { display: inline-flex; align-items: center; gap: 8px; border-radius: 999px; padding: 7px 12px; background: rgba(32,27,22,0.06); }
+    .dot { width: 10px; height: 10px; border-radius: 999px; background: var(--bad); }
+    .good .dot { background: var(--good); }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { text-align: left; padding: 10px 0; border-bottom: 1px solid var(--line); }
+    th { color: var(--muted); }
+    .error { color: var(--bad); margin-top: 12px; }
+    .summary-row { display: flex; justify-content: space-between; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--line); }
+    .summary-row strong { text-align: right; }
+    .token-meta {
+      color: var(--muted);
+      margin-top: -2px;
+      margin-bottom: 14px;
+    }
+    .token-card {
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      padding: 14px 16px;
+      background: rgba(255,255,255,0.45);
+      min-height: 92px;
+    }
+    .token-symbol {
+      font-weight: 700;
+      font-size: 1.02rem;
+      margin-bottom: 6px;
+    }
+    .token-token {
+      color: var(--muted);
+      font-size: 0.92rem;
+      margin-bottom: 10px;
+    }
+    .token-live {
+      font-size: 0.88rem;
+      color: var(--good);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+    .chart-shell {
+      margin-top: 12px;
+      border-radius: 18px;
+      background: linear-gradient(180deg, #14171d 0%, #11151b 100%);
+      border: 1px solid rgba(32, 27, 22, 0.08);
+      overflow: hidden;
+    }
+    .chart-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: center;
+      flex-wrap: wrap;
+      padding: 16px 18px 10px;
+      color: #e7edf4;
+    }
+    .chart-title {
+      font-size: 1.05rem;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+    }
+    .chart-meta {
+      color: #9db0c3;
+      font-size: 0.9rem;
+    }
+    .chart-controls {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .chart-range-label {
+      color: #9db0c3;
+      font-size: 0.78rem;
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+    }
+    .chart-range-select {
+      border: 1px solid rgba(157, 176, 195, 0.28);
+      background: rgba(11, 16, 23, 0.92);
+      color: #e7edf4;
+      padding: 10px 14px;
+      border-radius: 999px;
+      font: inherit;
+      cursor: pointer;
+    }
+    .chart-canvas {
+      position: relative;
+      height: 260px;
+      padding: 0 18px 18px;
+    }
+    .chart-empty {
+      height: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #7d8ea0;
+      font-size: 1.1rem;
+    }
+    .chart-svg {
+      width: 100%;
+      height: 100%;
+      display: block;
+    }
+    .chart-grid {
+      stroke: rgba(255, 255, 255, 0.08);
+      stroke-width: 1;
+    }
+    .chart-line {
+      fill: none;
+      stroke: #7ad46b;
+      stroke-width: 3;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+    .chart-area {
+      fill: rgba(122, 212, 107, 0.16);
+    }
+    .chart-dot {
+      fill: #7ad46b;
+      stroke: #dff7cf;
+      stroke-width: 2;
+    }
+    .chart-label {
+      fill: #9db0c3;
+      font-size: 12px;
+    }
+    @media (max-width: 1120px) { .stats, .tables, .summary-grid, .go-feed-grid, .token-grid { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <nav class="nav">
+      <h1 class="brand">{{.PageTitle}}</h1>
+      <a class="link" href="/">Home</a>
+      <a class="link" href="/services">Service List</a>
+    </nav>
+
+    <section class="panel" style="margin-bottom: 18px;">
+      <div class="eyebrow">Service Detail</div>
+      <div class="big" id="serviceName">{{.ServiceID}}</div>
+      <div id="serviceStatus" class="badge"><span class="dot"></span><span>Waiting...</span></div>
+      <div class="control-row">
+        <button id="startBtn" class="action-btn" disabled>Start</button>
+        <button id="stopBtn" class="action-btn" disabled>Stop</button>
+      </div>
+      <div id="serviceMeta" style="margin-top: 12px; color: var(--muted);"></div>
+      <div id="serviceError" class="error"></div>
+    </section>
+
+    <section class="panel chart-panel" id="ticksChartPanel" style="display:none;">
+      <div class="eyebrow">Realtime Tick Flow</div>
+      <div class="chart-shell">
+        <div class="chart-head">
+          <div>
+            <div class="chart-title">Raw Ticks Consumed/sec</div>
+            <div class="chart-meta" id="chartMeta">Rolling live view of websocket tick intake.</div>
+          </div>
+          <div class="chart-controls">
+            <label class="chart-range-label" for="chartRange">Time range</label>
+            <select class="chart-range-select" id="chartRange">
+              <option value="5m">Last 5 min</option>
+              <option value="15m">Last 15 min</option>
+              <option value="1h" selected>Last 1 hour</option>
+              <option value="3h">Last 3 hours</option>
+              <option value="6h">Last 6 hours</option>
+              <option value="all">All retained</option>
+            </select>
+          </div>
+        </div>
+        <div class="chart-canvas" id="ticksChartCanvas">
+          <div class="chart-empty">Waiting for tick history</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="stats">
+      <div class="panel"><div class="eyebrow">CPU</div><div class="big" id="cpuPercent">0.0%</div></div>
+      <div class="panel"><div class="eyebrow">RAM</div><div class="big" id="ramUsage">0 B</div></div>
+      <div class="panel"><div class="eyebrow">Goroutines</div><div class="big" id="goroutines">0</div></div>
+      <div class="panel"><div class="eyebrow">Uptime</div><div class="big" id="uptime">0s</div></div>
+    </section>
+
+    <section class="summary-grid" id="summaryGrid">
+      <div class="panel">
+        <div class="eyebrow">Summary</div>
+        <div id="summaryFields"></div>
+      </div>
+      <div class="panel">
+        <div class="eyebrow">Connections</div>
+        <table><tbody id="connections"></tbody></table>
+      </div>
+      <div class="panel">
+        <div class="eyebrow">Extra Data</div>
+        <table><tbody id="extraData"></tbody></table>
+      </div>
+    </section>
+
+    <section class="tables" id="detailTables">
+      <div class="panel">
+        <div class="eyebrow" id="section1Title">Section</div>
+        <table><tbody id="section1"></tbody></table>
+      </div>
+      <div class="panel">
+        <div class="eyebrow" id="section2Title">Section</div>
+        <table><tbody id="section2"></tbody></table>
+      </div>
+      <div class="panel">
+        <div class="eyebrow" id="section3Title">Section</div>
+        <table><tbody id="section3"></tbody></table>
+      </div>
+    </section>
+
+    <section class="summary-grid go-feed-grid" id="goFeedOverview" style="display:none;">
+      <div class="panel">
+        <div class="eyebrow">Summary</div>
+        <div id="goFeedSummary"></div>
+      </div>
+      <div class="panel">
+        <div class="eyebrow">Connections</div>
+        <table><tbody id="goFeedConnections"></tbody></table>
+      </div>
+      <div class="panel">
+        <div class="eyebrow">Feed Pipeline</div>
+        <table><tbody id="goFeedPipeline"></tbody></table>
+      </div>
+      <div class="panel">
+        <div class="eyebrow">Queues And Reconnects</div>
+        <table><tbody id="goFeedQueues"></tbody></table>
+      </div>
+    </section>
+
+    <section class="panel" id="subscriptionsPanel" style="display:none;">
+      <div class="eyebrow">Subscribed Tokens</div>
+      <div class="token-meta" id="subscriptionsMeta">Live subscription list.</div>
+      <div class="token-grid" id="subscriptionsGrid"></div>
+    </section>
+
+    <section class="panel" id="marketPricePanel" style="display:none;">
+      <div class="eyebrow">Market Price Grid</div>
+      <div class="token-meta" id="marketPriceMeta">Latest price by source topic.</div>
+      <div class="price-table-wrap">
+        <table class="price-table">
+          <thead id="marketPriceHead"></thead>
+          <tbody id="marketPriceBody"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="panel" id="runningTradesPanel" style="display:none;">
+      <div class="eyebrow">Running Trades</div>
+      <div class="token-meta" id="runningTradesMeta">Live mark-to-market for open paper positions.</div>
+      <div class="trade-table-wrap">
+        <table class="trade-table">
+          <thead>
+            <tr>
+              <th>Symbol</th>
+              <th>Strategy</th>
+              <th>Qty</th>
+              <th>Entry</th>
+              <th>Last</th>
+              <th>Invested</th>
+              <th>P&amp;L</th>
+              <th>P&amp;L %</th>
+              <th>Entry Time</th>
+              <th>Last Tick</th>
+            </tr>
+          </thead>
+          <tbody id="runningTradesBody"></tbody>
+        </table>
+      </div>
+    </section>
+  </div>
+
+  <script>
+    const serviceId = "{{.ServiceID}}";
+    let selectedChartRange = "1h";
+
+    function formatDate(value) {
+      if (!value) return "N/A";
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) return "N/A";
+      return date.toLocaleString();
+    }
+
+    function number(value) {
+      return new Intl.NumberFormat().format(value || 0);
+    }
+
+    function formatBytes(value) {
+      let size = Number(value || 0);
+      if (!size) return "0 B";
+      const units = ["B", "KB", "MB", "GB", "TB"];
+      let index = 0;
+      while (size >= 1024 && index < units.length - 1) {
+        size /= 1024;
+        index += 1;
+      }
+      return `${size.toFixed(1)} ${units[index]}`;
+    }
+
+    function formatDuration(seconds) {
+      const total = Math.max(0, Number(seconds || 0));
+      if (total < 60) return `${Math.floor(total)}s`;
+      if (total < 3600) return `${Math.floor(total / 60)}m ${Math.floor(total % 60)}s`;
+      return `${Math.floor(total / 3600)}h ${Math.floor((total % 3600) / 60)}m`;
+    }
+
+    function renderRows(containerId, rows, emptyMessage) {
+      const root = document.getElementById(containerId);
+      if (!rows.length) {
+        root.innerHTML = `<tr><td>${emptyMessage}</td></tr>`;
+        return;
+      }
+      root.innerHTML = rows.join("");
+    }
+
+    function renderSummaryFields(containerId, fields) {
+      const root = document.getElementById(containerId);
+      root.innerHTML = fields.length
+        ? fields.map(field => `<div class="summary-row"><span>${field.label}</span><strong>${field.value}</strong></div>`).join("")
+        : `<div class="summary-row"><span>No summary data</span><strong>N/A</strong></div>`;
+    }
+
+    function formatClock(value) {
+      if (!value) return "";
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) return "";
+      return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+    }
+
+    function rangeMs(value) {
+      switch (value) {
+        case "5m": return 5 * 60 * 1000;
+        case "15m": return 15 * 60 * 1000;
+        case "1h": return 60 * 60 * 1000;
+        case "3h": return 3 * 60 * 60 * 1000;
+        case "6h": return 6 * 60 * 60 * 1000;
+        default: return 0;
+      }
+    }
+
+    function renderTicksChart(service) {
+      const panel = document.getElementById("ticksChartPanel");
+      const canvas = document.getElementById("ticksChartCanvas");
+      const meta = document.getElementById("chartMeta");
+      const allPoints = Array.isArray(service.chart_points) ? service.chart_points : [];
+      const showChart = service.id === "go_feed";
+
+      panel.style.display = showChart ? "block" : "none";
+      if (!showChart) {
+        return;
+      }
+
+      const selectedRangeMs = rangeMs(selectedChartRange);
+      const latestAll = allPoints.length ? allPoints[allPoints.length - 1] : null;
+      const latestAllTs = latestAll ? new Date(latestAll.at).getTime() : 0;
+      const requestedWindowStartTs = selectedRangeMs > 0 ? latestAllTs - selectedRangeMs : (allPoints.length ? new Date(allPoints[0].at).getTime() : 0);
+      const points = selectedRangeMs > 0
+        ? allPoints.filter((point) => {
+            const ts = new Date(point.at).getTime();
+            return Number.isFinite(ts) && latestAllTs - ts <= selectedRangeMs;
+          })
+        : allPoints;
+
+      if (!points.length) {
+        meta.textContent = "Rolling live view of websocket tick intake.";
+        canvas.innerHTML = `<div class="chart-empty">Waiting for tick history</div>`;
+        return;
+      }
+
+      const width = 1120;
+      const height = 260;
+      const leftPad = 18;
+      const rightPad = 18;
+      const topPad = 18;
+      const bottomPad = 34;
+      const plotWidth = width - leftPad - rightPad;
+      const plotHeight = height - topPad - bottomPad;
+
+      const values = points.map((point) => Number(point.value || 0));
+      const maxValue = Math.max(...values, 1);
+      const minValue = Math.min(...values, 0);
+      const paddedMax = maxValue + Math.max(maxValue * 0.12, 1);
+      const paddedMin = Math.max(0, minValue - Math.max(maxValue * 0.05, 0.5));
+      const domainStartTs = selectedRangeMs > 0 ? requestedWindowStartTs : new Date(points[0].at).getTime();
+      const domainEndTs = latestAllTs || new Date(points[points.length - 1].at).getTime();
+
+      const xForPoint = (point, index) => {
+        const ts = new Date(point.at).getTime();
+        if (!Number.isFinite(ts) || domainEndTs <= domainStartTs) {
+          return points.length === 1 ? leftPad + plotWidth / 2 : leftPad + (index / Math.max(points.length - 1, 1)) * plotWidth;
+        }
+        const ratio = (ts - domainStartTs) / (domainEndTs - domainStartTs);
+        return leftPad + Math.min(Math.max(ratio, 0), 1) * plotWidth;
+      };
+      const yFor = (value) => {
+        if (paddedMax === paddedMin) return topPad + plotHeight / 2;
+        const ratio = (value - paddedMin) / (paddedMax - paddedMin);
+        return topPad + plotHeight - ratio * plotHeight;
+      };
+
+      const linePath = points.map((point, index) => {
+        const x = xForPoint(point, index);
+        const y = yFor(Number(point.value || 0));
+        return `${index === 0 ? "M" : "L"} ${x.toFixed(2)} ${y.toFixed(2)}`;
+      }).join(" ");
+
+      const firstX = xForPoint(points[0], 0);
+      const lastX = xForPoint(points[points.length - 1], points.length - 1);
+      const areaPath = `${linePath} L ${lastX.toFixed(2)} ${(topPad + plotHeight).toFixed(2)} L ${firstX.toFixed(2)} ${(topPad + plotHeight).toFixed(2)} Z`;
+
+      const grid = [0, 0.33, 0.66, 1].map((ratio) => {
+        const y = topPad + ratio * plotHeight;
+        return `<line class="chart-grid" x1="${leftPad}" y1="${y.toFixed(2)}" x2="${width - rightPad}" y2="${y.toFixed(2)}"></line>`;
+      }).join("");
+
+      const labels = [0, 0.5, 1].map((ratio) => {
+        const x = leftPad + ratio * plotWidth;
+        const labelTs = domainStartTs + ratio * (domainEndTs - domainStartTs);
+        const label = formatClock(new Date(labelTs).toISOString());
+        return `<text class="chart-label" x="${x.toFixed(2)}" y="${height - 8}" text-anchor="middle">${label}</text>`;
+      }).join("");
+
+      const latest = points[points.length - 1];
+      const first = points[0];
+      const rangeLabel = selectedChartRange === "all" ? "All retained history" : `Range ${selectedChartRange}`;
+      const collectedFromLabel = formatClock(first.at);
+      const requestedFromLabel = formatClock(new Date(domainStartTs).toISOString());
+      meta.textContent = `${rangeLabel} • Latest ${number(latest.value)} ticks/sec at ${formatClock(latest.at)} • Requested ${requestedFromLabel} → ${formatClock(latest.at)} • Collected since ${collectedFromLabel}`;
+
+      canvas.innerHTML = `
+        <svg class="chart-svg" viewBox="0 0 ${width} ${height}" preserveAspectRatio="none" role="img" aria-label="Raw ticks consumed per second">
+          ${grid}
+          <path class="chart-area" d="${areaPath}"></path>
+          <path class="chart-line" d="${linePath}"></path>
+          <circle class="chart-dot" cx="${lastX.toFixed(2)}" cy="${yFor(Number(latest.value || 0)).toFixed(2)}" r="5"></circle>
+          ${labels}
+          <text class="chart-label" x="${leftPad}" y="14">${number(paddedMax)}</text>
+          <text class="chart-label" x="${leftPad}" y="${(topPad + plotHeight).toFixed(2)}">${number(paddedMin)}</text>
+        </svg>
+      `;
+    }
+
+    function formatPrice(value) {
+      const num = Number(value);
+      if (!Number.isFinite(num)) return "N/A";
+      return num.toFixed(2);
+    }
+
+    function renderMarketPricePanel(snapshot) {
+      const panel = document.getElementById("marketPricePanel");
+      const sources = Array.isArray(snapshot.market_price_sources) ? snapshot.market_price_sources : [];
+      const rows = Array.isArray(snapshot.market_prices) ? snapshot.market_prices : [];
+      if (!sources.length) {
+        panel.style.display = "none";
+        return;
+      }
+      panel.style.display = "block";
+      document.getElementById("marketPriceMeta").textContent = `${number(rows.length)} stocks across ${number(sources.length)} source topics.`;
+      document.getElementById("marketPriceHead").innerHTML = `<tr><th>Symbol</th>${sources.map(source => `<th>${source}</th>`).join("")}</tr>`;
+      document.getElementById("marketPriceBody").innerHTML = rows.length
+        ? rows.map(row => {
+            const prices = row.prices || {};
+            return `<tr>
+              <td><strong>${row.symbol}</strong></td>
+              ${sources.map(source => {
+                const item = prices[source];
+                if (!item) return `<td><div class="price-cell"><span class="price-value">N/A</span><span class="price-time">-</span></div></td>`;
+                return `<td><div class="price-cell"><span class="price-value">${formatPrice(item.price)}</span><span class="price-time">${formatDate(item.timestamp)}</span></div></td>`;
+              }).join("")}
+            </tr>`;
+          }).join("")
+        : `<tr><td colspan="${sources.length + 1}">Waiting for market price data</td></tr>`;
+    }
+
+    function renderRunningTradesPanel(snapshot) {
+      const panel = document.getElementById("runningTradesPanel");
+      const rows = Array.isArray(snapshot.running_trades) ? snapshot.running_trades : [];
+      if (!rows.length) {
+        panel.style.display = serviceId === "paper_engine" ? "block" : "none";
+        document.getElementById("runningTradesMeta").textContent = "No open paper positions.";
+        document.getElementById("runningTradesBody").innerHTML = `<tr><td colspan="10">No running trades</td></tr>`;
+        return;
+      }
+      panel.style.display = "block";
+      document.getElementById("runningTradesMeta").textContent = `${number(rows.length)} live open trades.`;
+      document.getElementById("runningTradesBody").innerHTML = rows.map(row => {
+        const pnl = Number(row.unrealized_pnl || 0);
+        const pnlPct = Number(row.unrealized_pnl_pct || 0);
+        const pnlClass = pnl >= 0 ? "pnl-positive" : "pnl-negative";
+        return `<tr>
+          <td><strong>${row.symbol}</strong></td>
+          <td>${row.strategy || "-"}</td>
+          <td>${number(row.quantity)}</td>
+          <td>${formatPrice(row.entry_price)}</td>
+          <td>${formatPrice(row.last_price)}</td>
+          <td>${formatPrice(row.invested_amount || 0)}</td>
+          <td class="${pnlClass}">${formatPrice(pnl)}</td>
+          <td class="${pnlClass}">${pnlPct.toFixed(2)}%</td>
+          <td>${formatDate(row.entry_time)}</td>
+          <td>${formatDate(row.last_tick_time)}</td>
+        </tr>`;
+      }).join("");
+    }
+
+    async function runAction(action) {
+      const button = document.getElementById(action === "start" ? "startBtn" : "stopBtn");
+      const original = button.textContent;
+      button.disabled = true;
+      button.textContent = action === "start" ? "Starting..." : "Stopping...";
+      try {
+        const response = await fetch(`/api/actions/${serviceId}/${action}`, { method: "POST" });
+        const data = await response.json();
+        if (!response.ok || !data.ok) {
+          throw new Error(data.error || data.output || `Failed to ${action}`);
+        }
+        await refresh();
+      } catch (error) {
+        window.alert(error.message || `Failed to ${action} service`);
+      } finally {
+        button.disabled = false;
+        button.textContent = original;
+      }
+    }
+
+    async function refresh() {
+      const response = await fetch(`/api/services/${serviceId}`, { cache: "no-store" });
+      const service = await response.json();
+      const isGoFeed = service.id === "go_feed";
+
+      document.getElementById("serviceName").textContent = service.name;
+      const status = document.getElementById("serviceStatus");
+      status.className = "badge " + (service.healthy ? "good" : "");
+      status.querySelector("span:last-child").textContent = service.healthy ? "Healthy" : "Attention";
+      document.getElementById("serviceMeta").textContent = `Last updated: ${formatDate(service.last_updated_at)} | Source type: ${service.source_type} | Source: ${service.dashboard_url}`;
+      document.getElementById("serviceError").textContent = service.last_error || "";
+      document.getElementById("startBtn").disabled = !service.start_allowed;
+      document.getElementById("stopBtn").disabled = !service.stop_allowed;
+
+      const snapshot = service.snapshot || {};
+      const system = snapshot.system || {};
+      const connections = snapshot.connection_status || {};
+      const summaryFields = service.summary_fields || [];
+      const sections = service.detail_sections || [];
+      const subscriptions = (snapshot.subscriptions || []).map(item => [`Subscription: ${item.symbol}`, item.token]);
+      const subscriptionObjects = snapshot.subscriptions || [];
+
+      const isMarketPrice = service.id === "market_price";
+
+      document.getElementById("cpuPercent").textContent = `${Number(system.cpu_percent || 0).toFixed(1)}%`;
+      document.getElementById("ramUsage").textContent = formatBytes(system.resident_memory_bytes || system.sys_bytes || system.heap_alloc_bytes || 0);
+      document.getElementById("goroutines").textContent = number(system.goroutines || 0);
+      document.getElementById("uptime").textContent = formatDuration(snapshot.uptime_seconds || 0);
+
+      document.getElementById("summaryGrid").style.display = isGoFeed ? "none" : "grid";
+      document.getElementById("detailTables").style.display = isGoFeed ? "none" : "grid";
+      document.getElementById("goFeedOverview").style.display = isGoFeed ? "grid" : "none";
+      document.getElementById("subscriptionsPanel").style.display = isGoFeed ? "block" : "none";
+      document.getElementById("marketPricePanel").style.display = isMarketPrice ? "block" : "none";
+      document.getElementById("runningTradesPanel").style.display = service.id === "paper_engine" ? "block" : "none";
+
+      if (isGoFeed) {
+        const sectionMap = Object.fromEntries(sections.map(section => [section.title, section.fields || []]));
+        renderSummaryFields("goFeedSummary", summaryFields);
+        renderRows("goFeedConnections", Object.entries(connections).map(([name, up]) =>
+          `<tr><td>${name}</td><td>${up ? "green" : "red"}</td></tr>`
+        ), "No connection data");
+        renderRows("goFeedPipeline", (sectionMap["Feed Pipeline"] || []).map(field =>
+          `<tr><td>${field.label}</td><td>${field.value}</td></tr>`
+        ), "No pipeline data");
+        renderRows("goFeedQueues", (sectionMap["Queues And Reconnects"] || []).map(field =>
+          `<tr><td>${field.label}</td><td>${field.value}</td></tr>`
+        ), "No queue data");
+
+        document.getElementById("subscriptionsMeta").textContent = `${number(subscriptionObjects.length)} live subscribed stocks shown in 4 columns.`;
+        const subscriptionsGrid = document.getElementById("subscriptionsGrid");
+        subscriptionsGrid.innerHTML = subscriptionObjects.length
+          ? subscriptionObjects.map((item) => `
+              <div class="token-card">
+                <div class="token-symbol">${item.symbol}</div>
+                <div class="token-token">Token: ${item.token}</div>
+                <div class="token-live">Live subscribed</div>
+              </div>
+            `).join("")
+          : `<div class="summary-row"><span>No subscribed tokens</span><strong>N/A</strong></div>`;
+      } else {
+        renderSummaryFields("summaryFields", summaryFields);
+        renderRows("connections", Object.entries(connections).map(([name, up]) =>
+          `<tr><td>${name}</td><td>${up ? "green" : "red"}</td></tr>`
+        ), "No connection data");
+        renderRows("extraData", subscriptions.slice(0, 16).map(([label, value]) =>
+          `<tr><td>${label}</td><td>${value}</td></tr>`
+        ), "No extra data");
+
+        const renderedSections = [0, 1, 2].map(index => sections[index] || { title: "Section", fields: [] });
+        renderedSections.forEach((section, index) => {
+          document.getElementById(`section${index + 1}Title`).textContent = section.title || "Section";
+          renderRows(`section${index + 1}`, (section.fields || []).map(field =>
+            `<tr><td>${field.label}</td><td>${field.value}</td></tr>`
+          ), "No section data");
+        });
+        if (isMarketPrice) {
+          renderMarketPricePanel(snapshot);
+        }
+        if (service.id === "paper_engine") {
+          renderRunningTradesPanel(snapshot);
+        }
+      }
+
+      renderTicksChart(service);
+    }
+
+    document.getElementById("chartRange").addEventListener("change", (event) => {
+      selectedChartRange = event.target.value;
+      refresh().catch(console.error);
+    });
+    document.getElementById("startBtn").addEventListener("click", () => runAction("start"));
+    document.getElementById("stopBtn").addEventListener("click", () => runAction("stop"));
+
+    refresh().catch(console.error);
+    setInterval(() => refresh().catch(console.error), 2000);
+  </script>
+</body>
+</html>

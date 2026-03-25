@@ -1,31 +1,30 @@
-"""Kafka producer wrapper for tick publishing."""
+"""JetStream producer wrapper for tick publishing."""
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
-from typing import Any, Optional
+import re
+import threading
+from typing import Optional
 
 from python_feed_triplex import metrics
 
 try:
-    from confluent_kafka import KafkaException, Producer
+    from nats.aio.client import Client as NATS
+    from nats.js.api import RetentionPolicy, StorageType, StreamConfig, DiscardPolicy
 except Exception:  # pylint: disable=broad-except
-    Producer = None
-    KafkaException = Exception
+    NATS = None
+    StreamConfig = None
+    StorageType = None
+    RetentionPolicy = None
+    DiscardPolicy = None
 
 
 class KafkaTickProducer:
-    """Thin wrapper for producing ticks to Kafka."""
+    """Thin wrapper for publishing ticks to NATS JetStream."""
 
-    # __init__ creates the Kafka producer using provided connection parameters.
-    # Parameters:
-    # - bootstrap_servers: Kafka broker list.
-    # - topic: Kafka topic for ticks.
-    # - acks, linger_ms, batch_size: producer tuning options.
-    # - logger: logger for diagnostics.
-    # Returns: None.
-    # Flow: build producer config, instantiate Producer if available, warn otherwise.
     def __init__(
         self,
         bootstrap_servers: str,
@@ -35,104 +34,120 @@ class KafkaTickProducer:
         batch_size: int,
         logger: logging.Logger,
     ) -> None:
+        """Initialize the background event loop and connect once to JetStream."""
+        del acks, linger_ms, batch_size
         self.topic = topic
         self.logger = logger
-        self._producer: Optional[Producer] = None
+        self._bootstrap_servers = bootstrap_servers
+        self._nc: Optional[NATS] = None
+        self._js = None
+        self._loop: Optional[asyncio.AbstractEventLoop] = None
+        self._loop_thread: Optional[threading.Thread] = None
         self.logger.info(
-            "Initializing Kafka producer: brokers=%s topic=%s acks=%s linger_ms=%s batch_size=%s",
+            "Initializing JetStream producer: servers=%s subject_prefix=%s",
             bootstrap_servers,
             topic,
-            acks,
-            linger_ms,
-            batch_size,
         )
-        if Producer:
-            conf = {
-                "bootstrap.servers": bootstrap_servers,
-                "acks": acks,
-                "linger.ms": linger_ms,
-                "batch.num.messages": batch_size,
-                "queue.buffering.max.messages": 1000000,
-                "queue.buffering.max.kbytes": 1048576,  # 1 GB buffer
-                "message.timeout.ms": 30000,
-            }
+        if NATS:
             try:
-                self._producer = Producer(conf)
+                self._start_loop()
+                future = asyncio.run_coroutine_threadsafe(self._connect(), self._loop)
+                future.result(timeout=10)
                 metrics.KAFKA_CONNECTED.set(1)
-                self.logger.info("Kafka producer created successfully")
+                self.logger.info("JetStream producer created successfully")
             except Exception as exc:  # pylint: disable=broad-except
-                self.logger.error("Failed to create Kafka producer: %s", exc)
+                self.logger.error("Failed to create JetStream producer: %s", exc)
                 metrics.KAFKA_CONNECTED.set(0)
         else:
-            self.logger.warning("confluent_kafka not installed; Kafka publishing disabled")
+            self.logger.warning("nats-py not installed; JetStream publishing disabled")
             metrics.KAFKA_CONNECTED.set(0)
 
-    # send_tick encodes and publishes a normalized tick to Kafka.
-    # Parameters:
-    # - tick: normalized tick dictionary.
-    # Returns: None.
-    # Flow: JSON-encode tick, produce with symbol key, log delivery errors but do not raise.
     def send_tick(self, tick: dict) -> None:
-        payload = json.dumps(tick)
-        if not self._producer:
-            self.logger.debug("Kafka disabled; dropping tick for %s", tick.get("symbol"))
+        """Publish one normalized tick to a symbol-scoped JetStream subject."""
+        if not self._loop or not self._js:
+            self.logger.debug("JetStream disabled; dropping tick for %s", tick.get("symbol"))
             return
         try:
-            self.logger.debug("Producing tick for %s to topic=%s", tick.get("symbol"), self.topic)
-            self._producer.produce(
-                topic=self.topic,
-                key=str(tick.get("symbol", "")),
-                value=payload.encode("utf-8"),
-                on_delivery=self._delivery_report,
-            )
-            # Poll to serve delivery callbacks and drain internal queues.
-            self._producer.poll(0)
+            symbol = str(tick.get("symbol", "")).strip().upper()
+            subject = f"{self.topic}.python_feed_triplex.{_sanitize_token(symbol)}"
+            payload = json.dumps(tick).encode("utf-8")
+            future = asyncio.run_coroutine_threadsafe(self._js.publish(subject, payload), self._loop)
+            future.result(timeout=5)
             metrics.KAFKA_CONNECTED.set(1)
             metrics.TICKS_PUBLISHED.inc()
-        except BufferError:
-            self.logger.warning("Local Kafka producer queue full; dropping tick for %s", tick.get("symbol"))
-            metrics.ERRORS_TOTAL.inc()
-        except KafkaException as exc:  # type: ignore[misc]
-            self.logger.error("Kafka produce failed: %s", exc)
+        except Exception as exc:  # pylint: disable=broad-except
+            self.logger.error("JetStream publish failed: %s", exc)
             metrics.KAFKA_CONNECTED.set(0)
             metrics.ERRORS_TOTAL.inc()
 
-    # flush drains producer buffers to Kafka.
-    # Parameters: None.
-    # Returns: None.
-    # Flow: call Producer.flush if available.
     def flush(self) -> None:
-        if self._producer:
-            self.logger.info("Flushing Kafka producer buffers")
-            self._producer.flush()
+        return
 
-    # close flushes and releases producer resources.
-    # Parameters: None.
-    # Returns: None.
-    # Flow: flush outstanding messages, drop producer reference.
     def close(self) -> None:
-        self.logger.info("Closing Kafka producer")
-        self.flush()
-        self._producer = None
+        self.logger.info("Closing JetStream producer")
+        if self._loop and self._nc:
+            try:
+                future = asyncio.run_coroutine_threadsafe(self._nc.drain(), self._loop)
+                future.result(timeout=5)
+            except Exception:  # pylint: disable=broad-except
+                pass
+        if self._loop:
+            self._loop.call_soon_threadsafe(self._loop.stop)
+        if self._loop_thread and self._loop_thread.is_alive():
+            self._loop_thread.join(timeout=5)
+        self._nc = None
+        self._js = None
+        self._loop = None
+        self._loop_thread = None
         metrics.KAFKA_CONNECTED.set(0)
 
-    # _delivery_report logs delivery errors for produced messages.
-    # Parameters:
-    # - err: delivery error if any.
-    # - msg: message metadata (unused).
-    # Returns: None.
-    # Flow: log on error, ignore on success.
-    def _delivery_report(self, err: Any, msg: Any) -> None:  # pylint: disable=unused-argument
-        if err:
-            self.logger.error("Kafka delivery error: %s", err)
-            metrics.ERRORS_TOTAL.inc()
-        else:
-            try:
-                self.logger.debug(
-                    "Kafka delivery success topic=%s partition=%s offset=%s",
-                    msg.topic(),
-                    msg.partition(),
-                    msg.offset(),
-                )
-            except Exception:  # pylint: disable=broad-except
-                self.logger.debug("Kafka delivery success")
+    async def _connect(self) -> None:
+        """Open the NATS connection and ensure the shared tick stream exists."""
+        servers = [_normalize_nats_url(self._bootstrap_servers)]
+        self._nc = NATS()
+        await self._nc.connect(servers=servers, reconnect_time_wait=2, max_reconnect_attempts=-1)
+        self._js = self._nc.jetstream()
+        await _ensure_stream(self._js, self.topic)
+
+    def _start_loop(self) -> None:
+        self._loop = asyncio.new_event_loop()
+
+        def _runner() -> None:
+            asyncio.set_event_loop(self._loop)
+            self._loop.run_forever()
+
+        self._loop_thread = threading.Thread(target=_runner, name="python-feed-jetstream", daemon=True)
+        self._loop_thread.start()
+
+
+async def _ensure_stream(js, prefix: str) -> None:
+    """Create the tick stream once if it is not already present."""
+    name = prefix.upper().replace(".", "_").replace("-", "_")
+    try:
+        await js.stream_info(name)
+        return
+    except Exception:  # pylint: disable=broad-except
+        pass
+    await js.add_stream(
+        StreamConfig(
+            name=name,
+            subjects=[f"{prefix}.>"],
+            storage=StorageType.FILE,
+            retention=RetentionPolicy.LIMITS,
+            discard=DiscardPolicy.OLD,
+            max_age=72 * 60 * 60,
+            num_replicas=1,
+        )
+    )
+
+
+def _normalize_nats_url(raw: str) -> str:
+    value = raw.split(",")[0].strip()
+    if value.startswith("nats://") or value.startswith("tls://"):
+        return value
+    return f"nats://{value}"
+
+
+def _sanitize_token(value: str) -> str:
+    cleaned = re.sub(r"[^A-Z0-9_-]+", "_", value.strip().upper())
+    return cleaned or "UNKNOWN"

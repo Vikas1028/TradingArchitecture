@@ -1,16 +1,12 @@
 {
   "env": "prod",
   "kafka": {
-    "bootstrap_servers": "localhost:9092",
+    "bootstrap_servers": "nats://127.0.0.1:4222",
     "group_id": "first-candle-strategy",
-    "candles_topic": "candles.1m",
+    "candles_topic": "candle.raw",
     "signal_topic": "signals.strategy",
     "commit_interval_ms": 1000,
     "startup_replay_grace_sec": 120
-  },
-  "log": {
-    "level": "DEBUG",
-    "file": "logs/first_candle_strategy.log"
   },
   "strategy": {
     "timezone": "Asia/Kolkata",

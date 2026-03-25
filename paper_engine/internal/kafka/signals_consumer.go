@@ -5,60 +5,60 @@ import (
 	"encoding/json"
 	"strings"
 	"time"
+	"unicode"
 
-	"github.com/segmentio/kafka-go"
+	"github.com/nats-io/nats.go"
 	"go.uber.org/zap"
 
 	cfgpkg "paper_engine/internal/config"
 	"paper_engine/internal/engine"
 )
 
-// SignalsConsumer wraps a Kafka consumer that reads StrategySignal messages.
-// Inputs: KafkaConfig, logger; Outputs: StrategySignal via Poll.
 type SignalsConsumer struct {
-	reader        *kafka.Reader
+	conn          *nats.Conn
+	sub           *nats.Subscription
 	logger        *zap.Logger
-	lastMsg       *kafka.Message
+	lastMsg       *nats.Msg
 	startupCutoff time.Time
 }
 
-// NewSignalsConsumer creates a Kafka consumer subscribed to cfg.SignalsTopic.
-// Inputs: KafkaConfig, logger.
-// Outputs: SignalsConsumer ready to Poll.
 func NewSignalsConsumer(cfg cfgpkg.KafkaConfig, logger *zap.Logger) (*SignalsConsumer, error) {
-	reader := kafka.NewReader(kafka.ReaderConfig{
-		Brokers:        []string{cfg.BootstrapServers},
-		GroupID:        cfg.SignalsGroupID,
-		GroupTopics:    []string{cfg.SignalsTopic},
-		MinBytes:       1,
-		MaxBytes:       10e6,
-		StartOffset:    kafka.LastOffset,
-		CommitInterval: 0,
-	})
+	nc, js, err := connect(cfg.BootstrapServers)
+	if err != nil {
+		return nil, err
+	}
+	if err := ensureStream(js, cfg.SignalsTopic, 720*time.Hour); err != nil {
+		nc.Close()
+		return nil, err
+	}
+	sub, err := js.PullSubscribe(
+		strings.TrimSpace(cfg.SignalsTopic),
+		sanitizeName(cfg.SignalsGroupID),
+		nats.BindStream(streamName(cfg.SignalsTopic)),
+		nats.DeliverLast(),
+		nats.ManualAck(),
+		nats.AckExplicit(),
+	)
+	if err != nil {
+		nc.Close()
+		return nil, err
+	}
 	startupCutoff := time.Time{}
 	if cfg.StartupReplayGraceSec > 0 {
 		startupCutoff = time.Now().Add(-time.Duration(cfg.StartupReplayGraceSec) * time.Second)
 	}
-	return &SignalsConsumer{
-		reader:        reader,
-		logger:        logger,
-		startupCutoff: startupCutoff,
-	}, nil
+	return &SignalsConsumer{conn: nc, sub: sub, logger: logger, startupCutoff: startupCutoff}, nil
 }
 
-// Poll reads a StrategySignal from Kafka or returns nil if there is no message.
-// Inputs: context; Outputs: *StrategySignal or error.
-// Flow: fetch message, unmarshal JSON, parse time, uppercase symbol.
 func (c *SignalsConsumer) Poll(ctx context.Context) (*engine.StrategySignal, error) {
-	msg, err := c.reader.FetchMessage(ctx)
+	msg, err := fetchOne(ctx, c.sub)
 	if err != nil {
-		if err == context.Canceled || err == context.DeadlineExceeded {
+		if err == context.Canceled || err == context.DeadlineExceeded || err == nats.ErrTimeout {
 			return nil, nil
 		}
 		return nil, err
 	}
-	c.lastMsg = &msg
-
+	c.lastMsg = msg
 	var raw struct {
 		Strategy string `json:"strategy"`
 		Symbol   string `json:"symbol"`
@@ -66,7 +66,7 @@ func (c *SignalsConsumer) Poll(ctx context.Context) (*engine.StrategySignal, err
 		Time     string `json:"time"`
 		Reason   string `json:"reason"`
 	}
-	if err := json.Unmarshal(msg.Value, &raw); err != nil {
+	if err := json.Unmarshal(msg.Data, &raw); err != nil {
 		c.logger.Warn("failed to unmarshal signal", zap.Error(err))
 		_ = c.Commit()
 		return nil, nil
@@ -77,7 +77,6 @@ func (c *SignalsConsumer) Poll(ctx context.Context) (*engine.StrategySignal, err
 		_ = c.Commit()
 		return nil, nil
 	}
-
 	sig := engine.StrategySignal{
 		Strategy: raw.Strategy,
 		Symbol:   strings.ToUpper(strings.TrimSpace(raw.Symbol)),
@@ -86,28 +85,92 @@ func (c *SignalsConsumer) Poll(ctx context.Context) (*engine.StrategySignal, err
 		Reason:   raw.Reason,
 	}
 	if !c.startupCutoff.IsZero() && parsedTime.Before(c.startupCutoff) {
-		c.logger.Debug("skipping stale signal from startup backlog",
-			zap.String("symbol", sig.Symbol),
-			zap.Time("signal_time", parsedTime),
-			zap.Time("startup_cutoff", c.startupCutoff),
-		)
 		_ = c.Commit()
 		return nil, nil
 	}
 	return &sig, nil
 }
 
-// Commit commits the current consumer offsets.
-// Inputs: none; Outputs: error on failure.
 func (c *SignalsConsumer) Commit() error {
 	if c.lastMsg == nil {
 		return nil
 	}
-	return c.reader.CommitMessages(context.Background(), *c.lastMsg)
+	msg := c.lastMsg
+	c.lastMsg = nil
+	return msg.Ack()
 }
 
-// Close closes the underlying Kafka reader.
-// Inputs: none; Outputs: error from close if any.
 func (c *SignalsConsumer) Close() error {
-	return c.reader.Close()
+	if c.conn != nil {
+		c.conn.Drain()
+		c.conn.Close()
+	}
+	return nil
+}
+
+func connect(rawURL string) (*nats.Conn, nats.JetStreamContext, error) {
+	url := strings.TrimSpace(rawURL)
+	if !strings.HasPrefix(url, "nats://") && !strings.HasPrefix(url, "tls://") {
+		url = "nats://" + url
+	}
+	nc, err := nats.Connect(url, nats.MaxReconnects(-1), nats.ReconnectWait(2*time.Second))
+	if err != nil {
+		return nil, nil, err
+	}
+	js, err := nc.JetStream()
+	if err != nil {
+		nc.Close()
+		return nil, nil, err
+	}
+	return nc, js, nil
+}
+
+func ensureStream(js nats.JetStreamContext, prefix string, maxAge time.Duration) error {
+	name := streamName(prefix)
+	if info, err := js.StreamInfo(name); err == nil && info != nil {
+		return nil
+	}
+	_, err := js.AddStream(&nats.StreamConfig{Name: name, Subjects: []string{strings.TrimSpace(prefix) + ".>"}, Storage: nats.FileStorage, Retention: nats.LimitsPolicy, Discard: nats.DiscardOld, MaxAge: maxAge, Replicas: 1})
+	if err != nil && !strings.Contains(strings.ToLower(err.Error()), "already") && !strings.Contains(strings.ToLower(err.Error()), "in use") {
+		return err
+	}
+	return nil
+}
+
+func fetchOne(ctx context.Context, sub *nats.Subscription) (*nats.Msg, error) {
+	wait := 250 * time.Millisecond
+	if deadline, ok := ctx.Deadline(); ok {
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			return nil, context.DeadlineExceeded
+		}
+		if remaining < wait {
+			wait = remaining
+		}
+	}
+	msgs, err := sub.Fetch(1, nats.MaxWait(wait))
+	if err != nil {
+		return nil, err
+	}
+	if len(msgs) == 0 {
+		return nil, nats.ErrTimeout
+	}
+	return msgs[0], nil
+}
+
+func streamName(prefix string) string {
+	return strings.ToUpper(strings.NewReplacer(".", "_", "-", "_").Replace(prefix))
+}
+
+func sanitizeName(value string) string {
+	return strings.Map(func(r rune) rune {
+		switch {
+		case unicode.IsLetter(r), unicode.IsDigit(r):
+			return r
+		case r == '-', r == '_':
+			return r
+		default:
+			return '_'
+		}
+	}, strings.TrimSpace(value))
 }

@@ -1,0 +1,26 @@
+{
+  "env": "prod",
+  "kafka": {
+    "bootstrap_servers": "nats://127.0.0.1:4222",
+    "group_prefix": "market-price-v2",
+    "topics": [
+      {
+        "name": "go_feed",
+        "kafka_topic": "ticks.raw"
+      },
+      {
+        "name": "python_feed_triplex",
+        "kafka_topic": "ticks.raw"
+      },
+      {
+        "name": "go_ltp",
+        "kafka_topic": "ticks.raw"
+      }
+    ]
+  },
+  "service": {
+    "bind_address": ":9107",
+    "metrics_bind_address": ":9207",
+    "metrics_path": "/metrics"
+  }
+}

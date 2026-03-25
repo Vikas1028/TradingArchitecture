@@ -10,6 +10,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"first_candle_strategy/common"
 	"first_candle_strategy/internal/config"
 	"first_candle_strategy/internal/kafka"
 	"first_candle_strategy/internal/logging"
@@ -20,7 +21,7 @@ import (
 // main wires configuration, logging, Kafka IO, and the first-candle strategy loop.
 // Flow: load config, init logger, create consumer/producer, process 1m candles into signals until shutdown.
 func main() {
-	configPath := flag.String("config", "config/first_candle_strategy_config.json", "path to config file")
+	configPath := flag.String("config", "", "path to config file")
 	flag.Parse()
 	if err := run(*configPath); err != nil {
 		zap.L().Fatal("service exited with error", zap.Error(err))
@@ -36,16 +37,18 @@ func run(configPath string) error {
 		return err
 	}
 
-	logger, err := logging.NewLogger(cfg.Log)
+	logger, err := logging.NewLogger()
 	if err != nil {
 		return err
 	}
 	defer logger.Sync() //nolint:errcheck
 	zap.ReplaceGlobals(logger)
-	_ = metrics.InitAndServeMetrics("9103")
+	_ = metrics.InitAndServeMetrics(common.DefaultMetricsPort)
 	metrics.ServiceUp.Set(1)
 
 	logger.Info("starting first candle strategy service",
+		zap.String("app", common.AppName),
+		zap.String("version", common.AppVersion),
 		zap.String("env", cfg.Env),
 		zap.String("bootstrap", cfg.Kafka.BootstrapServers),
 		zap.String("group", cfg.Kafka.GroupID),
@@ -92,19 +95,11 @@ func run(configPath string) error {
 		return err
 	}
 
-	commitTicker := time.NewTicker(time.Duration(cfg.Kafka.CommitIntervalMs) * time.Millisecond)
-	defer commitTicker.Stop()
-
 	for {
 		select {
 		case <-ctx.Done():
 			logger.Info("context cancelled; exiting loop")
 			goto shutdown
-		case <-commitTicker.C:
-			if err := consumer.Commit(); err != nil {
-				logger.Warn("commit failed", zap.Error(err))
-				metrics.ErrorsTotal.Inc()
-			}
 		default:
 			candle, err := consumer.Poll(ctx)
 			if err != nil {
@@ -114,6 +109,10 @@ func run(configPath string) error {
 			}
 			if candle == nil {
 				continue
+			}
+			if err := consumer.Commit(); err != nil {
+				logger.Warn("commit failed", zap.Error(err))
+				metrics.ErrorsTotal.Inc()
 			}
 			metrics.CandlesConsumedTotal.Inc()
 			sig := engine.OnCandle(*candle)

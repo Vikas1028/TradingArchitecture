@@ -19,18 +19,18 @@
   "fiscalYearStartMonth": 0,
   "graphTooltip": 0,
   "id": null,
-  "iteration": 1,
+  "iteration": 3,
   "links": [],
   "liveNow": false,
   "panels": [
     {
       "type": "row",
-      "title": "python_feed",
+      "title": "python_feed_triplex",
       "gridPos": {
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 0
+        "y": 16
       }
     },
     {
@@ -44,7 +44,7 @@
         "h": 4,
         "w": 3,
         "x": 3,
-        "y": 1
+        "y": 17
       },
       "targets": [
         {
@@ -63,16 +63,16 @@
     },
     {
       "type": "timeseries",
-      "title": "WS Reconnects & Errors",
+      "title": "WS Health",
       "datasource": {
         "type": "prometheus",
         "uid": "df6gucjnmg1z4a"
       },
       "gridPos": {
         "h": 4,
-        "w": 15,
-        "x": 9,
-        "y": 1
+        "w": 14,
+        "x": 10,
+        "y": 17
       },
       "targets": [
         {
@@ -89,16 +89,16 @@
     },
     {
       "type": "stat",
-      "title": "Tick Counters (Total)",
+      "title": "Tick Counters",
       "datasource": {
         "type": "prometheus",
         "uid": "df6gucjnmg1z4a"
       },
       "gridPos": {
         "h": 4,
-        "w": 3,
+        "w": 4,
         "x": 6,
-        "y": 1
+        "y": 17
       },
       "targets": [
         {
@@ -143,9 +143,9 @@
           ],
           "fields": ""
         },
-        "orientation": "vertical",
+        "orientation": "horizontal",
         "textMode": "value_and_name",
-        "wideLayout": false,
+        "wideLayout": true,
         "colorMode": "value",
         "graphMode": "none",
         "justifyMode": "auto",
@@ -154,7 +154,7 @@
     },
     {
       "type": "timeseries",
-      "title": "Connect/Disconnect Count by Client (Total)",
+      "title": "WS Event Count",
       "datasource": {
         "type": "prometheus",
         "uid": "df6gucjnmg1z4a"
@@ -163,24 +163,47 @@
         "h": 6,
         "w": 12,
         "x": 12,
-        "y": 5
+        "y": 21
       },
       "targets": [
         {
-          "expr": "python_feed_ws_client_connects_total",
-          "legendFormat": "{{client}} connect",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "df6gucjnmg1z4a"
+          },
+          "editorMode": "code",
+          "expr": "python_feed_ws_client_connects_total{client=\"ws-a\"}",
+          "legendFormat": "connect",
+          "range": true,
           "refId": "A"
         },
         {
-          "expr": "python_feed_ws_client_disconnects_total",
-          "legendFormat": "{{client}} {{reason}} disconnect",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "df6gucjnmg1z4a"
+          },
+          "editorMode": "code",
+          "expr": "sum(python_feed_ws_client_disconnects_total{client=\"ws-a\"})",
+          "legendFormat": "disconnect",
+          "range": true,
           "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "df6gucjnmg1z4a"
+          },
+          "editorMode": "code",
+          "expr": "python_feed_ws_client_no_tick_relogin_total{client=\"ws-a\"}",
+          "legendFormat": "no_tick_reconnect",
+          "range": true,
+          "refId": "C"
         }
       ]
     },
     {
       "type": "gauge",
-      "title": "Active WS Clients",
+      "title": "Active WS",
       "datasource": {
         "type": "prometheus",
         "uid": "df6gucjnmg1z4a"
@@ -189,7 +212,7 @@
         "h": 4,
         "w": 3,
         "x": 0,
-        "y": 1
+        "y": 17
       },
       "targets": [
         {
@@ -208,7 +231,7 @@
     },
     {
       "type": "timeseries",
-      "title": "WS Client Connected State (0/1)",
+      "title": "WS Connected State",
       "datasource": {
         "type": "prometheus",
         "uid": "df6gucjnmg1z4a"
@@ -217,19 +240,19 @@
         "h": 6,
         "w": 8,
         "x": 0,
-        "y": 11
+        "y": 27
       },
       "targets": [
         {
-          "expr": "python_feed_ws_client_connected",
-          "legendFormat": "{{client}}",
+          "expr": "python_feed_ws_client_connected{client=\"ws-a\"}",
+          "legendFormat": "connected",
           "refId": "A"
         }
       ]
     },
     {
-      "type": "timeseries",
-      "title": "No-Tick Relogin Count by Client (Total)",
+      "type": "stat",
+      "title": "No-Tick Reconnects",
       "datasource": {
         "type": "prometheus",
         "uid": "df6gucjnmg1z4a"
@@ -238,19 +261,35 @@
         "h": 6,
         "w": 4,
         "x": 8,
-        "y": 11
+        "y": 27
       },
       "targets": [
         {
-          "expr": "python_feed_ws_client_no_tick_relogin_total",
-          "legendFormat": "{{client}}",
+          "expr": "python_feed_ws_client_no_tick_relogin_total{client=\"ws-a\"} or vector(0)",
+          "legendFormat": "no_tick_reconnect",
           "refId": "A"
         }
-      ]
+      ],
+      "options": {
+        "reduceOptions": {
+          "values": false,
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": ""
+        },
+        "orientation": "vertical",
+        "textMode": "value_and_name",
+        "wideLayout": false,
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "showPercentChange": false
+      }
     },
     {
       "type": "timeseries",
-      "title": "Last Disconnect/Reconnect/NoTick Relogin Time (Unix)",
+      "title": "Last WS Event Time",
       "datasource": {
         "type": "prometheus",
         "uid": "df6gucjnmg1z4a"
@@ -259,22 +298,40 @@
         "h": 6,
         "w": 12,
         "x": 12,
-        "y": 11
+        "y": 27
       },
       "targets": [
         {
-          "expr": "python_feed_ws_client_last_disconnect_unixtime",
-          "legendFormat": "{{client}} last_disconnect",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "df6gucjnmg1z4a"
+          },
+          "editorMode": "code",
+          "expr": "python_feed_ws_client_last_connect_unixtime{client=\"ws-a\"}",
+          "legendFormat": "last_connect",
+          "range": true,
           "refId": "A"
         },
         {
-          "expr": "python_feed_ws_client_last_connect_unixtime",
-          "legendFormat": "{{client}} last_connect",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "df6gucjnmg1z4a"
+          },
+          "editorMode": "code",
+          "expr": "python_feed_ws_client_last_disconnect_unixtime{client=\"ws-a\"}",
+          "legendFormat": "last_disconnect",
+          "range": true,
           "refId": "B"
         },
         {
-          "expr": "python_feed_ws_client_last_no_tick_relogin_unixtime",
-          "legendFormat": "{{client}} last_no_tick_relogin",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "df6gucjnmg1z4a"
+          },
+          "editorMode": "code",
+          "expr": "python_feed_ws_client_last_no_tick_relogin_unixtime{client=\"ws-a\"}",
+          "legendFormat": "last_no_tick_reconnect",
+          "range": true,
           "refId": "C"
         }
       ]
@@ -286,7 +343,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 17
+        "y": 33
       }
     },
     {
@@ -300,7 +357,7 @@
         "h": 4,
         "w": 6,
         "x": 0,
-        "y": 18
+        "y": 34
       },
       "targets": [
         {
@@ -328,7 +385,7 @@
         "h": 4,
         "w": 6,
         "x": 6,
-        "y": 18
+        "y": 34
       },
       "targets": [
         {
@@ -347,28 +404,7 @@
     },
     {
       "type": "timeseries",
-      "title": "Ticks Consumed/s",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "df6gucjnmg1z4a"
-      },
-      "gridPos": {
-        "h": 6,
-        "w": 12,
-        "x": 12,
-        "y": 18
-      },
-      "targets": [
-        {
-          "expr": "rate(marketdata_ticks_consumed_total[5m])",
-          "legendFormat": "ticks/s",
-          "refId": "A"
-        }
-      ]
-    },
-    {
-      "type": "timeseries",
-      "title": "Candles Emitted/s",
+      "title": "Raw Ticks Consumed/min",
       "datasource": {
         "type": "prometheus",
         "uid": "df6gucjnmg1z4a"
@@ -377,12 +413,33 @@
         "h": 6,
         "w": 12,
         "x": 0,
-        "y": 22
+        "y": 38
       },
       "targets": [
         {
-          "expr": "rate(marketdata_candles_emitted_total[5m])",
-          "legendFormat": "candles/s",
+          "expr": "increase(marketdata_ticks_consumed_total[1m])",
+          "legendFormat": "ticks/min",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Candles Emitted/min",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "df6gucjnmg1z4a"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 6,
+        "x": 12,
+        "y": 38
+      },
+      "targets": [
+        {
+          "expr": "increase(marketdata_candles_emitted_total[1m])",
+          "legendFormat": "candles/min",
           "refId": "A"
         }
       ]
@@ -396,17 +453,104 @@
       },
       "gridPos": {
         "h": 6,
-        "w": 12,
-        "x": 12,
-        "y": 22
+        "w": 6,
+        "x": 18,
+        "y": 38
       },
       "targets": [
         {
-          "expr": "increase(marketdata_errors_total[5m])",
+          "expr": "increase(marketdata_errors_total[1m])",
           "legendFormat": "errors",
           "refId": "A"
         }
       ]
+    },
+    {
+      "type": "stat",
+      "title": "Tick Gap (sec)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "df6gucjnmg1z4a"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 12,
+        "y": 34
+      },
+      "targets": [
+        {
+          "expr": "marketdata_tick_gap_seconds",
+          "legendFormat": "gap_sec",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "values": false,
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": ""
+        },
+        "orientation": "auto",
+        "textMode": "value_and_name",
+        "wideLayout": true,
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "showPercentChange": false
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "decimals": 1
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Last Tick Time",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "df6gucjnmg1z4a"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 18,
+        "y": 34
+      },
+      "targets": [
+        {
+          "expr": "marketdata_last_tick_unixtime",
+          "legendFormat": "last_tick",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "values": false,
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": ""
+        },
+        "orientation": "auto",
+        "textMode": "value_and_name",
+        "wideLayout": true,
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "showPercentChange": false
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "dateTimeAsIso"
+        },
+        "overrides": []
+      }
     },
     {
       "type": "row",
@@ -415,7 +559,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 28
+        "y": 44
       }
     },
     {
@@ -429,7 +573,7 @@
         "h": 4,
         "w": 6,
         "x": 0,
-        "y": 29
+        "y": 45
       },
       "targets": [
         {
@@ -457,7 +601,7 @@
         "h": 6,
         "w": 12,
         "x": 6,
-        "y": 29
+        "y": 45
       },
       "targets": [
         {
@@ -478,7 +622,7 @@
         "h": 6,
         "w": 12,
         "x": 18,
-        "y": 29
+        "y": 45
       },
       "targets": [
         {
@@ -499,7 +643,7 @@
         "h": 6,
         "w": 12,
         "x": 0,
-        "y": 35
+        "y": 51
       },
       "targets": [
         {
@@ -516,7 +660,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 54
+        "y": 70
       }
     },
     {
@@ -526,7 +670,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 41
+        "y": 57
       }
     },
     {
@@ -540,7 +684,7 @@
         "h": 4,
         "w": 6,
         "x": 0,
-        "y": 42
+        "y": 58
       },
       "targets": [
         {
@@ -568,7 +712,7 @@
         "h": 6,
         "w": 9,
         "x": 6,
-        "y": 42
+        "y": 58
       },
       "targets": [
         {
@@ -589,7 +733,7 @@
         "h": 6,
         "w": 9,
         "x": 15,
-        "y": 42
+        "y": 58
       },
       "targets": [
         {
@@ -610,7 +754,7 @@
         "h": 6,
         "w": 12,
         "x": 0,
-        "y": 48
+        "y": 64
       },
       "targets": [
         {
@@ -631,7 +775,7 @@
         "h": 4,
         "w": 6,
         "x": 0,
-        "y": 55
+        "y": 71
       },
       "targets": [
         {
@@ -659,7 +803,7 @@
         "h": 6,
         "w": 12,
         "x": 6,
-        "y": 55
+        "y": 71
       },
       "targets": [
         {
@@ -680,7 +824,7 @@
         "h": 6,
         "w": 12,
         "x": 18,
-        "y": 55
+        "y": 71
       },
       "targets": [
         {
@@ -701,7 +845,7 @@
         "h": 6,
         "w": 12,
         "x": 0,
-        "y": 61
+        "y": 77
       },
       "targets": [
         {
@@ -722,7 +866,7 @@
         "h": 6,
         "w": 12,
         "x": 12,
-        "y": 61
+        "y": 77
       },
       "targets": [
         {
@@ -739,7 +883,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 67
+        "y": 83
       }
     },
     {
@@ -753,7 +897,7 @@
         "h": 4,
         "w": 6,
         "x": 0,
-        "y": 68
+        "y": 84
       },
       "targets": [
         {
@@ -781,7 +925,7 @@
         "h": 6,
         "w": 9,
         "x": 6,
-        "y": 68
+        "y": 84
       },
       "targets": [
         {
@@ -802,7 +946,7 @@
         "h": 6,
         "w": 9,
         "x": 15,
-        "y": 68
+        "y": 84
       },
       "targets": [
         {
@@ -823,7 +967,7 @@
         "h": 6,
         "w": 12,
         "x": 0,
-        "y": 74
+        "y": 90
       },
       "targets": [
         {
@@ -835,7 +979,7 @@
     },
     {
       "id": 1,
-      "title": "Tick Received by Clients",
+      "title": "Ticks Received",
       "type": "timeseries",
       "datasource": {
         "type": "prometheus",
@@ -914,8 +1058,8 @@
             "uid": "df6gucjnmg1z4a"
           },
           "editorMode": "code",
-          "expr": "python_feed_ticks_received_by_client_total",
-          "legendFormat": "{{client}}",
+          "expr": "python_feed_ticks_received_by_client_total{client=\"ws-a\"}",
+          "legendFormat": "ticks",
           "range": true,
           "refId": "A"
         }
@@ -924,7 +1068,391 @@
         "h": 6,
         "w": 12,
         "x": 0,
-        "y": 5
+        "y": 21
+      }
+    },
+    {
+      "type": "row",
+      "title": "live_feed",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 96
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Live Feed Tick/sec",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "df6gucjnmg1z4a"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "barAlignment": 0,
+            "lineWidth": 2,
+            "fillOpacity": 12,
+            "gradientMode": "none",
+            "spanNulls": false,
+            "insertNulls": false,
+            "showPoints": "never",
+            "pointSize": 5,
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            },
+            "axisPlacement": "auto",
+            "axisLabel": "ticks/sec",
+            "axisColorMode": "text",
+            "axisBorderShow": false,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "axisCenteredZero": false,
+            "hideFrom": {
+              "tooltip": false,
+              "viz": false,
+              "legend": false
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 0
+              }
+            ]
+          },
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "options": {
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        },
+        "legend": {
+          "showLegend": true,
+          "displayMode": "list",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(go_feed_ticks_received_total{job=\"go_feed\"}[1m])) or vector(0)",
+          "legendFormat": "go_feed",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(rate(go_feed_ticks_received_total{job=\"go_ltp\"}[1m])) or vector(0)",
+          "legendFormat": "go_ltp",
+          "refId": "C"
+        },
+        {
+          "expr": "sum(rate(python_feed_ticks_received_total{job=\"python_feed_triplex\"}[1m])) or vector(0)",
+          "legendFormat": "python_feed_triplex",
+          "refId": "D"
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "go_feed Tick/sec",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "df6gucjnmg1z4a"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "barAlignment": 0,
+            "lineWidth": 2,
+            "fillOpacity": 12,
+            "gradientMode": "none",
+            "spanNulls": false,
+            "insertNulls": false,
+            "showPoints": "never",
+            "pointSize": 5,
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            },
+            "axisPlacement": "auto",
+            "axisLabel": "ticks/sec",
+            "axisColorMode": "text",
+            "axisBorderShow": false,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "axisCenteredZero": false,
+            "hideFrom": {
+              "tooltip": false,
+              "viz": false,
+              "legend": false
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 0
+              }
+            ]
+          },
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "options": {
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        },
+        "legend": {
+          "showLegend": true,
+          "displayMode": "list",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(go_feed_ticks_received_total{job=\"go_feed\"}[1m])) or vector(0)",
+          "legendFormat": "go_feed",
+          "refId": "A"
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 8
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "go_ltp Tick/sec",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "df6gucjnmg1z4a"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "barAlignment": 0,
+            "lineWidth": 2,
+            "fillOpacity": 12,
+            "gradientMode": "none",
+            "spanNulls": false,
+            "insertNulls": false,
+            "showPoints": "never",
+            "pointSize": 5,
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            },
+            "axisPlacement": "auto",
+            "axisLabel": "ticks/sec",
+            "axisColorMode": "text",
+            "axisBorderShow": false,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "axisCenteredZero": false,
+            "hideFrom": {
+              "tooltip": false,
+              "viz": false,
+              "legend": false
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 0
+              }
+            ]
+          },
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "options": {
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        },
+        "legend": {
+          "showLegend": true,
+          "displayMode": "list",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(go_feed_ticks_received_total{job=\"go_ltp\"}[1m])) or vector(0)",
+          "legendFormat": "go_ltp",
+          "refId": "A"
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 8
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "python_feed_triplex Tick/sec",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "df6gucjnmg1z4a"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "barAlignment": 0,
+            "lineWidth": 2,
+            "fillOpacity": 12,
+            "gradientMode": "none",
+            "spanNulls": false,
+            "insertNulls": false,
+            "showPoints": "never",
+            "pointSize": 5,
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            },
+            "axisPlacement": "auto",
+            "axisLabel": "ticks/sec",
+            "axisColorMode": "text",
+            "axisBorderShow": false,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "axisCenteredZero": false,
+            "hideFrom": {
+              "tooltip": false,
+              "viz": false,
+              "legend": false
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 0
+              }
+            ]
+          },
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "options": {
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        },
+        "legend": {
+          "showLegend": true,
+          "displayMode": "list",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(python_feed_ticks_received_total{job=\"python_feed_triplex\"}[1m])) or vector(0)",
+          "legendFormat": "python_feed_triplex",
+          "refId": "A"
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 8
       }
     }
   ],
@@ -946,6 +1474,6 @@
   "timezone": "",
   "title": "Trading Services Status",
   "uid": "adf9v9j",
-  "version": 11,
+  "version": 19,
   "weekStart": ""
 }

@@ -6,70 +6,71 @@ import (
 	"strings"
 	"time"
 
-	"github.com/segmentio/kafka-go"
+	"github.com/nats-io/nats.go"
 	"go.uber.org/zap"
 
 	cfgpkg "paper_engine/internal/config"
 	"paper_engine/internal/engine"
 )
 
-// CandlesConsumer wraps a Kafka consumer that reads Candle messages for stocks.
-// Inputs: KafkaConfig, logger; Outputs: Candle via Poll.
 type CandlesConsumer struct {
-	reader        *kafka.Reader
+	conn          *nats.Conn
+	sub           *nats.Subscription
 	logger        *zap.Logger
-	lastMsg       *kafka.Message
+	lastMsg       *nats.Msg
 	startupCutoff time.Time
+	priceDivisor  float64
 }
 
-// NewCandlesConsumer creates a Kafka consumer subscribed to cfg.CandlesTopic.
-// Inputs: KafkaConfig, logger.
-// Outputs: CandlesConsumer ready to Poll.
 func NewCandlesConsumer(cfg cfgpkg.KafkaConfig, logger *zap.Logger) (*CandlesConsumer, error) {
-	reader := kafka.NewReader(kafka.ReaderConfig{
-		Brokers:        []string{cfg.BootstrapServers},
-		GroupID:        cfg.CandlesGroupID,
-		GroupTopics:    []string{cfg.CandlesTopic},
-		MinBytes:       1,
-		MaxBytes:       10e6,
-		StartOffset:    kafka.LastOffset,
-		CommitInterval: 0,
-	})
+	nc, js, err := connect(cfg.BootstrapServers)
+	if err != nil {
+		return nil, err
+	}
+	if err := ensureStream(js, cfg.CandlesTopic, 720*time.Hour); err != nil {
+		nc.Close()
+		return nil, err
+	}
+	sub, err := js.PullSubscribe(
+		strings.TrimSpace(cfg.CandlesTopic)+".stock.1m.*",
+		sanitizeName(cfg.CandlesGroupID),
+		nats.BindStream(streamName(cfg.CandlesTopic)),
+		nats.DeliverNew(),
+		nats.ManualAck(),
+		nats.AckExplicit(),
+	)
+	if err != nil {
+		nc.Close()
+		return nil, err
+	}
 	startupCutoff := time.Time{}
 	if cfg.StartupReplayGraceSec > 0 {
 		startupCutoff = time.Now().Add(-time.Duration(cfg.StartupReplayGraceSec) * time.Second)
 	}
-	return &CandlesConsumer{
-		reader:        reader,
-		logger:        logger,
-		startupCutoff: startupCutoff,
-	}, nil
+	return &CandlesConsumer{conn: nc, sub: sub, logger: logger, startupCutoff: startupCutoff, priceDivisor: cfg.PriceScaleDivisor}, nil
 }
 
-// Poll reads a Candle from Kafka or returns nil if there is no message.
-// Inputs: context; Outputs: *Candle or error.
-// Flow: fetch, unmarshal, parse time, uppercase symbol.
 func (c *CandlesConsumer) Poll(ctx context.Context) (*engine.Candle, error) {
-	msg, err := c.reader.FetchMessage(ctx)
+	msg, err := fetchOne(ctx, c.sub)
 	if err != nil {
-		if err == context.Canceled || err == context.DeadlineExceeded {
+		if err == context.Canceled || err == context.DeadlineExceeded || err == nats.ErrTimeout {
 			return nil, nil
 		}
 		return nil, err
 	}
-	c.lastMsg = &msg
-
+	c.lastMsg = msg
 	var raw struct {
-		Symbol string  `json:"symbol"`
-		Time   string  `json:"time"`
-		Open   float64 `json:"open"`
-		High   float64 `json:"high"`
-		Low    float64 `json:"low"`
-		Close  float64 `json:"close"`
-		Volume int64   `json:"volume"`
-		VWAP   float64 `json:"vwap"`
+		Symbol    string  `json:"symbol"`
+		Time      string  `json:"time"`
+		Timeframe string  `json:"timeframe"`
+		Open      float64 `json:"open"`
+		High      float64 `json:"high"`
+		Low       float64 `json:"low"`
+		Close     float64 `json:"close"`
+		Volume    int64   `json:"volume"`
+		VWAP      float64 `json:"vwap"`
 	}
-	if err := json.Unmarshal(msg.Value, &raw); err != nil {
+	if err := json.Unmarshal(msg.Data, &raw); err != nil {
 		c.logger.Warn("failed to unmarshal candle", zap.Error(err))
 		_ = c.Commit()
 		return nil, nil
@@ -80,40 +81,48 @@ func (c *CandlesConsumer) Poll(ctx context.Context) (*engine.Candle, error) {
 		_ = c.Commit()
 		return nil, nil
 	}
-
 	candle := engine.Candle{
-		Symbol: strings.ToUpper(strings.TrimSpace(raw.Symbol)),
-		Time:   parsedTime,
-		Open:   raw.Open,
-		High:   raw.High,
-		Low:    raw.Low,
-		Close:  raw.Close,
-		Volume: raw.Volume,
-		VWAP:   raw.VWAP,
+		Symbol:    strings.ToUpper(strings.TrimSpace(raw.Symbol)),
+		Time:      parsedTime,
+		Timeframe: strings.TrimSpace(raw.Timeframe),
+		Open:      raw.Open,
+		High:      raw.High,
+		Low:       raw.Low,
+		Close:     raw.Close,
+		Volume:    raw.Volume,
+		VWAP:      raw.VWAP,
 	}
-	if !c.startupCutoff.IsZero() && parsedTime.Before(c.startupCutoff) {
-		c.logger.Debug("skipping stale candle from startup backlog",
-			zap.String("symbol", candle.Symbol),
-			zap.Time("candle_time", parsedTime),
-			zap.Time("startup_cutoff", c.startupCutoff),
-		)
+	if candle.Timeframe != "1m" {
 		_ = c.Commit()
 		return nil, nil
+	}
+	if !c.startupCutoff.IsZero() && parsedTime.Before(c.startupCutoff) {
+		_ = c.Commit()
+		return nil, nil
+	}
+	if c.priceDivisor != 0 && c.priceDivisor != 1 {
+		candle.Open /= c.priceDivisor
+		candle.High /= c.priceDivisor
+		candle.Low /= c.priceDivisor
+		candle.Close /= c.priceDivisor
+		candle.VWAP /= c.priceDivisor
 	}
 	return &candle, nil
 }
 
-// Commit commits the current consumer offsets.
-// Inputs: none; Outputs: error on failure.
 func (c *CandlesConsumer) Commit() error {
 	if c.lastMsg == nil {
 		return nil
 	}
-	return c.reader.CommitMessages(context.Background(), *c.lastMsg)
+	msg := c.lastMsg
+	c.lastMsg = nil
+	return msg.Ack()
 }
 
-// Close closes the underlying Kafka reader.
-// Inputs: none; Outputs: error from close if any.
 func (c *CandlesConsumer) Close() error {
-	return c.reader.Close()
+	if c.conn != nil {
+		c.conn.Drain()
+		c.conn.Close()
+	}
+	return nil
 }

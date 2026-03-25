@@ -1,17 +1,13 @@
 {
   "env": "prod",
   "kafka": {
-    "bootstrap_servers": "localhost:9092",
+    "bootstrap_servers": "nats://127.0.0.1:4222",
     "group_id": "ldrb-strategy",
-    "stock_candles_topic": "candles.1m",
-    "index_candles_topic": "indices.1m",
+    "stock_candles_topic": "candle.raw",
+    "index_candles_topic": "indices.raw",
     "signal_topic": "signals.strategy",
     "commit_interval_ms": 1000,
-    "startup_replay_grace_sec": 120
-  },
-  "log": {
-    "level": "DEBUG",
-    "file": "logs/ldrb_strategy.log"
+    "startup_replay_grace_sec": 21600
   },
   "dependencies": {
     "events_path": "/Users/vikasbhandekar/Desktop/TradingArchitecture/ldrb_strategy/data/events_next_day.json",
@@ -52,10 +48,9 @@
     "require_spread_check": false,
     "max_spread_pct": 0.0015,
     "swing_start": "11:00",
-    "index_symbol": "NIFTY 50",
+    "index_symbol": "NIFTY",
     "enable_market_filter": true,
     "enable_event_filter": true,
     "enable_same_day_failure_exit": true
   }
 }
-

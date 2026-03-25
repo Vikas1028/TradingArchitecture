@@ -19,6 +19,16 @@ var (
 		Name: "marketdata_kafka_out_connected",
 		Help: "Kafka producer connection status for candles (1=connected,0=disconnected)",
 	})
+	// LastTickUnix records the exchange/event time of the most recent consumed tick.
+	LastTickUnix = prometheus.NewGauge(prometheus.GaugeOpts{
+		Name: "marketdata_last_tick_unixtime",
+		Help: "Unix timestamp of the most recent tick consumed from ticks.raw",
+	})
+	// TickGapSeconds tracks how long it has been since the last consumed tick.
+	TickGapSeconds = prometheus.NewGauge(prometheus.GaugeOpts{
+		Name: "marketdata_tick_gap_seconds",
+		Help: "Seconds since the most recent tick consumed from ticks.raw",
+	})
 )
 
 // Counters
@@ -45,6 +55,8 @@ func InitAndServeMetrics(port string) error {
 	prometheus.MustRegister(
 		KafkaInConnected,
 		KafkaOutConnected,
+		LastTickUnix,
+		TickGapSeconds,
 		TicksConsumedTotal,
 		CandlesEmittedTotal,
 		ErrorsTotal,

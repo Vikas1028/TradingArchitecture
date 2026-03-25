@@ -13,7 +13,7 @@
   },
   "kafka_comment": "Kafka connection settings for publishing normalized ticks to topic ticks.raw.",
   "kafka": {
-    "bootstrap_servers": "localhost:9092",
+    "bootstrap_servers": "nats://127.0.0.1:4222",
     "topic": "ticks.raw",
     "acks": "1",
     "linger_ms": 5,
@@ -35,16 +35,16 @@
   },
   "log_comment": "Logging configuration: level and output file path.",
   "log": {
-    "level": "INFO",
-    "file": "logs/app.log"
+    "level": "INFO"
   },
   "metrics": {
     "port": 9000
   },
-  "reconnect_comment": "Reconnect behavior: 3 fixed clients, per-client no-tick relogin+recreate, and duplicate-drop TTL.",
+  "reconnect_comment": "Reconnect behavior: single websocket for the full universe, websocket recreate on sustained no-tick, and duplicate-drop TTL.",
   "reconnect": {
     "backoff_seconds": 5,
-    "no_ticks_relogin_sec": 10,
+    "no_ticks_reconnect_sec": 45,
+    "connect_grace_sec": 60,
     "dedupe_ttl_sec": 10,
     "manager_monitor_interval_sec": 1
   }

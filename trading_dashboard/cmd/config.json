@@ -1,0 +1,106 @@
+{
+  "bind_address": ":9200",
+  "page_title": "Trading Dashboard",
+  "refresh_interval_sec": 1,
+  "services": [
+    {
+      "id": "go_feed",
+      "name": "Go Feed",
+      "source_type": "go_feed_dashboard",
+      "dashboard_url": "http://localhost:9100/dashboard",
+      "start_script": "/Users/vikasbhandekar/live_services/go_feed/scripts/start_mac.sh",
+      "stop_script": "/Users/vikasbhandekar/live_services/go_feed/scripts/stop_mac.sh",
+      "launchd_label": "com.go_feed.service"
+    },
+    {
+      "id": "first_candle_strategy",
+      "name": "First Candle Strategy",
+      "source_type": "prometheus_metrics",
+      "dashboard_url": "http://localhost:9103/metrics",
+      "start_script": "/Users/vikasbhandekar/live_services/first_candle_strategy/scripts/start_mac.sh",
+      "stop_script": "/Users/vikasbhandekar/live_services/first_candle_strategy/scripts/stop_mac.sh",
+      "launchd_label": "com.first_candle_strategy.service"
+    },
+    {
+      "id": "marketdata",
+      "name": "Marketdata",
+      "source_type": "prometheus_metrics",
+      "dashboard_url": "http://localhost:9104/metrics",
+      "start_script": "/Users/vikasbhandekar/live_services/marketdata/scripts/start_mac.sh",
+      "stop_script": "/Users/vikasbhandekar/live_services/marketdata/scripts/stop_mac.sh",
+      "launchd_label": "com.marketdata.service"
+    },
+    {
+      "id": "paper_engine",
+      "name": "Paper Engine",
+      "source_type": "go_feed_dashboard",
+      "dashboard_url": "http://localhost:9102/dashboard",
+      "start_script": "/Users/vikasbhandekar/live_services/paper_engine/scripts/start_mac.sh",
+      "stop_script": "/Users/vikasbhandekar/live_services/paper_engine/scripts/stop_mac.sh",
+      "launchd_label": "com.paper_engine.service"
+    },
+    {
+      "id": "python_feed_triplex",
+      "name": "Python Feed Triplex",
+      "source_type": "prometheus_metrics",
+      "dashboard_url": "http://localhost:9000/metrics",
+      "start_script": "/Users/vikasbhandekar/live_services/python_feed_triplex/internal/scripts/start_mac.sh",
+      "stop_script": "/Users/vikasbhandekar/live_services/python_feed_triplex/internal/scripts/stop_mac.sh",
+      "launchd_label": "com.python_feed_triplex.service"
+    },
+    {
+      "id": "vwap_strategy",
+      "name": "VWAP Strategy",
+      "source_type": "prometheus_metrics",
+      "dashboard_url": "http://localhost:9101/metrics",
+      "start_script": "/Users/vikasbhandekar/live_services/vwap_strategy/scripts/start_mac.sh",
+      "stop_script": "/Users/vikasbhandekar/live_services/vwap_strategy/scripts/stop_mac.sh",
+      "launchd_label": "com.vwap_strategy.service"
+    },
+    {
+      "id": "ldrb_strategy",
+      "name": "LDRB Strategy",
+      "source_type": "prometheus_metrics",
+      "dashboard_url": "http://localhost:9106/metrics",
+      "start_script": "/Users/vikasbhandekar/live_services/ldrb_strategy/scripts/start_mac.sh",
+      "stop_script": "/Users/vikasbhandekar/live_services/ldrb_strategy/scripts/stop_mac.sh",
+      "launchd_label": "com.ldrb_strategy.service"
+    },
+    {
+      "id": "go_ltp",
+      "name": "Go LTP",
+      "source_type": "prometheus_metrics",
+      "dashboard_url": "http://localhost:9111/metrics",
+      "start_script": "/Users/vikasbhandekar/live_services/go_ltp/scripts/start_mac.sh",
+      "stop_script": "/Users/vikasbhandekar/live_services/go_ltp/scripts/stop_mac.sh",
+      "launchd_label": "com.go_ltp.service"
+    },
+    {
+      "id": "volatile_strategy",
+      "name": "Volatile Strategy",
+      "source_type": "go_feed_dashboard",
+      "dashboard_url": "http://localhost:9108/dashboard",
+      "start_script": "/Users/vikasbhandekar/live_services/volatile_strategy/scripts/start_mac.sh",
+      "stop_script": "/Users/vikasbhandekar/live_services/volatile_strategy/scripts/stop_mac.sh",
+      "launchd_label": "com.volatile_strategy.service"
+    },
+    {
+      "id": "market_price",
+      "name": "Market Price",
+      "source_type": "go_feed_dashboard",
+      "dashboard_url": "http://localhost:9107/dashboard",
+      "start_script": "/Users/vikasbhandekar/live_services/market_price/scripts/start_mac.sh",
+      "stop_script": "/Users/vikasbhandekar/live_services/market_price/scripts/stop_mac.sh",
+      "launchd_label": "com.market_price.service"
+    },
+    {
+      "id": "market_caffeinate",
+      "name": "Market Caffeinate",
+      "source_type": "control_only",
+      "dashboard_url": "",
+      "start_script": "/Users/vikasbhandekar/live_services/market_caffeinate/scripts/start_mac.sh",
+      "stop_script": "/Users/vikasbhandekar/live_services/market_caffeinate/scripts/stop_mac.sh",
+      "launchd_label": "com.market_caffeinate.service"
+    }
+  ]
+}

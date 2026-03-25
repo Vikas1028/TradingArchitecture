@@ -23,6 +23,8 @@ type DailyState struct {
 type EngineState struct {
 	Positions      map[string]*Position
 	LatestCandles  map[string]*Candle
+	LatestPrices   map[string]float64
+	LastPriceTimes map[string]time.Time
 	PendingSignals map[string]*PendingSignal
 	Daily          DailyState
 
@@ -41,6 +43,8 @@ func NewEngineState(risk config.RiskConfig, trading config.TradingConfig, tz *ti
 	return &EngineState{
 		Positions:      make(map[string]*Position),
 		LatestCandles:  make(map[string]*Candle),
+		LatestPrices:   make(map[string]float64),
+		LastPriceTimes: make(map[string]time.Time),
 		PendingSignals: make(map[string]*PendingSignal),
 		Daily: DailyState{
 			Date: now,

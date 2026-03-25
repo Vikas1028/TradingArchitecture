@@ -6,107 +6,114 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode"
 
-	"github.com/segmentio/kafka-go"
+	"github.com/nats-io/nats.go"
 	"go.uber.org/zap"
 
+	"marketdata/common"
 	"marketdata/internal/candle"
 	"marketdata/internal/config"
 	"marketdata/internal/metrics"
 )
 
-// TickConsumer wraps a Kafka consumer that reads Tick messages from the ticks topic.
-// Inputs: KafkaConfig and logger; Outputs: parsed Tick instances via Poll.
-// Flow: builds a kafka-go reader with manual commits; Poll returns a Tick or nil on timeout.
 type TickConsumer struct {
-	reader        *kafka.Reader
+	conn          *nats.Conn
+	js            nats.JetStreamContext
+	sub           *nats.Subscription
 	logger        *zap.Logger
-	lastMsg       *kafka.Message
+	lastMsg       *nats.Msg
 	startupCutoff time.Time
 }
 
-// NewTickConsumer constructs a Kafka consumer subscribed to cfg.TicksTopic using cfg.GroupID.
-// Inputs: KafkaConfig, logger.
-// Outputs: TickConsumer ready to Poll.
-// Flow: build reader with commit disabled; subscribe to topic.
 func NewTickConsumer(cfg config.KafkaConfig, logger *zap.Logger) (*TickConsumer, error) {
-	reader := kafka.NewReader(kafka.ReaderConfig{
-		Brokers:        []string{cfg.BootstrapServers},
-		GroupID:        cfg.GroupID,
-		Topic:          cfg.TicksTopic,
-		MinBytes:       1,
-		MaxBytes:       10e6,
-		StartOffset:    kafka.LastOffset,
-		CommitInterval: 0, // manual commits
-	})
+	nc, js, err := connect(cfg.BootstrapServers)
+	if err != nil {
+		return nil, err
+	}
+	if err := ensureStream(js, cfg.TicksTopic, 72*time.Hour); err != nil {
+		nc.Close()
+		return nil, err
+	}
+
+	filter := strings.TrimSpace(cfg.TicksTopic) + ".>"
+	sub, err := js.PullSubscribe(
+		filter,
+		sanitizeConsumerName(cfg.GroupID),
+		nats.BindStream(streamName(cfg.TicksTopic)),
+		nats.DeliverNew(),
+		nats.ManualAck(),
+		nats.AckExplicit(),
+	)
+	if err != nil {
+		nc.Close()
+		return nil, err
+	}
 
 	startupCutoff := time.Time{}
 	if cfg.StartupReplayGraceSec > 0 {
 		startupCutoff = time.Now().Add(-time.Duration(cfg.StartupReplayGraceSec) * time.Second)
 	}
 
-	tc := &TickConsumer{
-		reader:        reader,
+	metrics.KafkaInConnected.Set(1)
+	return &TickConsumer{
+		conn:          nc,
+		js:            js,
+		sub:           sub,
 		logger:        logger,
 		startupCutoff: startupCutoff,
-	}
-	metrics.KafkaInConnected.Set(1)
-	return tc, nil
+	}, nil
 }
 
-// Poll reads the next Tick message from Kafka or returns nil if there is no message yet.
-// Inputs: context for cancellation.
-// Outputs: *Tick (may be nil) and error if fatal.
-// Flow: Fetch message, decode JSON, parse time, uppercase symbol; on parse errors log+commit+skip.
 func (c *TickConsumer) Poll(ctx context.Context) (*candle.Tick, error) {
-	msg, err := c.reader.FetchMessage(ctx)
+	msg, err := fetchOne(ctx, c.sub)
 	if err != nil {
 		if err == context.Canceled || err == context.DeadlineExceeded {
+			return nil, nil
+		}
+		if err == nats.ErrTimeout {
 			return nil, nil
 		}
 		metrics.KafkaInConnected.Set(0)
 		metrics.ErrorsTotal.Inc()
 		return nil, err
 	}
-	c.lastMsg = &msg
+	c.lastMsg = msg
 
 	var raw struct {
-		Symbol   string  `json:"symbol"`
-		Exchange string  `json:"exchange"`
-		Time     string  `json:"time"`
-		LTP      float64 `json:"ltp"`
-		Volume   int64   `json:"volume"`
-		Bid      float64 `json:"bid"`
-		Ask      float64 `json:"ask"`
+		Symbol    string  `json:"symbol"`
+		Exchange  string  `json:"exchange"`
+		Time      string  `json:"time"`
+		Timestamp string  `json:"timestamp"`
+		LTP       float64 `json:"ltp"`
+		Volume    int64   `json:"volume"`
+		Bid       float64 `json:"bid"`
+		Ask       float64 `json:"ask"`
+		Payload   struct {
+			SecurityID        string  `json:"security_id"`
+			Symbol            string  `json:"symbol"`
+			ExchangeSegment   uint8   `json:"exchange_segment"`
+			Timestamp         string  `json:"timestamp"`
+			LTP               float64 `json:"ltp"`
+			Volume            int64   `json:"volume"`
+			TotalSellQuantity int64   `json:"total_sell_quantity"`
+			TotalBuyQuantity  int64   `json:"total_buy_quantity"`
+		} `json:"payload"`
 	}
-	if err := json.Unmarshal(msg.Value, &raw); err != nil {
+	if err := json.Unmarshal(msg.Data, &raw); err != nil {
 		c.logger.Warn("failed to unmarshal tick", zap.Error(err))
 		metrics.ErrorsTotal.Inc()
 		_ = c.Commit()
 		return nil, nil
 	}
-	parsedTime, err := time.Parse(time.RFC3339Nano, raw.Time)
+	tick, err := normalizeTick(raw)
 	if err != nil {
-		c.logger.Warn("failed to parse tick time", zap.Error(err))
+		c.logger.Warn("failed to normalize tick", zap.Error(err))
 		metrics.ErrorsTotal.Inc()
 		_ = c.Commit()
 		return nil, nil
 	}
-	tick := candle.Tick{
-		Symbol:   strings.ToUpper(strings.TrimSpace(raw.Symbol)),
-		Exchange: raw.Exchange,
-		Time:     parsedTime,
-		LTP:      raw.LTP,
-		Volume:   raw.Volume,
-		Bid:      raw.Bid,
-		Ask:      raw.Ask,
-	}
-	if !c.startupCutoff.IsZero() && parsedTime.Before(c.startupCutoff) {
-		c.logger.Debug("skipping stale tick from startup backlog",
-			zap.String("symbol", tick.Symbol),
-			zap.Time("tick_time", parsedTime),
-			zap.Time("startup_cutoff", c.startupCutoff),
-		)
+	if !c.startupCutoff.IsZero() && tick.Time.Before(c.startupCutoff) {
 		_ = c.Commit()
 		return nil, nil
 	}
@@ -114,55 +121,193 @@ func (c *TickConsumer) Poll(ctx context.Context) (*candle.Tick, error) {
 	return &tick, nil
 }
 
-// Commit commits the current consumer offsets if manual committing is used.
-// Inputs: none; Outputs: error if commit fails.
-// Flow: commit last fetched message to Kafka.
+func normalizeTick(raw struct {
+	Symbol    string  `json:"symbol"`
+	Exchange  string  `json:"exchange"`
+	Time      string  `json:"time"`
+	Timestamp string  `json:"timestamp"`
+	LTP       float64 `json:"ltp"`
+	Volume    int64   `json:"volume"`
+	Bid       float64 `json:"bid"`
+	Ask       float64 `json:"ask"`
+	Payload   struct {
+		SecurityID        string  `json:"security_id"`
+		Symbol            string  `json:"symbol"`
+		ExchangeSegment   uint8   `json:"exchange_segment"`
+		Timestamp         string  `json:"timestamp"`
+		LTP               float64 `json:"ltp"`
+		Volume            int64   `json:"volume"`
+		TotalSellQuantity int64   `json:"total_sell_quantity"`
+		TotalBuyQuantity  int64   `json:"total_buy_quantity"`
+	} `json:"payload"`
+}) (candle.Tick, error) {
+	if symbol := strings.ToUpper(strings.TrimSpace(raw.Payload.Symbol)); symbol != "" {
+		parsedTime, err := parseTickTime(raw.Payload.Timestamp, raw.Timestamp)
+		if err != nil {
+			return candle.Tick{}, err
+		}
+		source := "go_ltp"
+		if raw.Payload.Volume > 0 || raw.Payload.TotalBuyQuantity > 0 || raw.Payload.TotalSellQuantity > 0 {
+			source = "go_feed"
+		}
+		return candle.Tick{
+			Symbol:   symbol,
+			Exchange: "NSE_EQ",
+			Time:     parsedTime,
+			Source:   source,
+			LTP:      raw.Payload.LTP,
+			Volume:   raw.Payload.Volume,
+		}, nil
+	}
+
+	symbol := strings.ToUpper(strings.TrimSpace(raw.Symbol))
+	if symbol == "" {
+		return candle.Tick{}, fmt.Errorf("tick missing symbol")
+	}
+	parsedTime, err := parseTickTime(raw.Time, raw.Timestamp)
+	if err != nil {
+		return candle.Tick{}, err
+	}
+	return candle.Tick{
+		Symbol:   symbol,
+		Exchange: raw.Exchange,
+		Time:     parsedTime,
+		Source:   "python_feed_triplex",
+		LTP:      raw.LTP / 100.0,
+		Volume:   raw.Volume,
+		Bid:      raw.Bid / 100.0,
+		Ask:      raw.Ask / 100.0,
+	}, nil
+}
+
+func parseTickTime(primary string, fallback string) (time.Time, error) {
+	value := strings.TrimSpace(primary)
+	if value == "" {
+		value = strings.TrimSpace(fallback)
+	}
+	if value == "" {
+		return time.Time{}, fmt.Errorf("tick missing timestamp")
+	}
+	return time.Parse(time.RFC3339Nano, value)
+}
+
 func (c *TickConsumer) Commit() error {
 	if c.lastMsg == nil {
 		return nil
 	}
-	return c.reader.CommitMessages(context.Background(), *c.lastMsg)
+	msg := c.lastMsg
+	c.lastMsg = nil
+	return msg.Ack()
 }
 
-// Close closes the underlying Kafka reader.
-// Inputs: none; Outputs: error from close if any.
 func (c *TickConsumer) Close() error {
 	metrics.KafkaInConnected.Set(0)
-	return c.reader.Close()
+	if c.conn != nil {
+		c.conn.Drain()
+		c.conn.Close()
+	}
+	return nil
 }
 
-// EnsureTopics creates the required topics if they do not exist.
-// Inputs: bootstrap server string, topic names slice, replication factor 1 and partitions 1 by default.
-// Outputs: error on failure.
 func EnsureTopics(ctx context.Context, bootstrap string, topics []string) error {
-	conn, err := kafka.DialContext(ctx, "tcp", bootstrap)
+	nc, js, err := connect(bootstrap)
 	if err != nil {
-		return fmt.Errorf("dial kafka: %w", err)
+		return err
 	}
-	defer conn.Close()
+	defer nc.Close()
 
-	existing, err := conn.ReadPartitions()
-	if err != nil {
-		return fmt.Errorf("read partitions: %w", err)
-	}
-	exists := make(map[string]bool)
-	for _, p := range existing {
-		exists[p.Topic] = true
-	}
-
-	configs := make([]kafka.TopicConfig, 0)
-	for _, t := range topics {
-		if exists[t] {
-			continue
+	for _, topic := range topics {
+		maxAge := 720 * time.Hour
+		if topic == common.DefaultTicksTopic {
+			maxAge = 72 * time.Hour
 		}
-		configs = append(configs, kafka.TopicConfig{
-			Topic:             t,
-			NumPartitions:     1,
-			ReplicationFactor: 1,
-		})
+		if err := ensureStream(js, topic, maxAge); err != nil {
+			return err
+		}
 	}
-	if len(configs) == 0 {
+	return nil
+}
+
+func connect(rawURL string) (*nats.Conn, nats.JetStreamContext, error) {
+	url := normalizeNATSURL(rawURL)
+	nc, err := nats.Connect(url, nats.MaxReconnects(-1), nats.ReconnectWait(2*time.Second))
+	if err != nil {
+		return nil, nil, err
+	}
+	js, err := nc.JetStream()
+	if err != nil {
+		nc.Close()
+		return nil, nil, err
+	}
+	return nc, js, nil
+}
+
+func ensureStream(js nats.JetStreamContext, prefix string, maxAge time.Duration) error {
+	name := streamName(prefix)
+	if info, err := js.StreamInfo(name); err == nil && info != nil {
 		return nil
 	}
-	return conn.CreateTopics(configs...)
+	_, err := js.AddStream(&nats.StreamConfig{
+		Name:      name,
+		Subjects:  []string{strings.TrimSpace(prefix) + ".>"},
+		Storage:   nats.FileStorage,
+		Retention: nats.LimitsPolicy,
+		Discard:   nats.DiscardOld,
+		MaxAge:    maxAge,
+		Replicas:  1,
+	})
+	if err != nil && !strings.Contains(strings.ToLower(err.Error()), "already") && !strings.Contains(strings.ToLower(err.Error()), "in use") {
+		return err
+	}
+	return nil
+}
+
+func fetchOne(ctx context.Context, sub *nats.Subscription) (*nats.Msg, error) {
+	wait := 250 * time.Millisecond
+	if deadline, ok := ctx.Deadline(); ok {
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			return nil, context.DeadlineExceeded
+		}
+		if remaining < wait {
+			wait = remaining
+		}
+	}
+	msgs, err := sub.Fetch(1, nats.MaxWait(wait))
+	if err != nil {
+		return nil, err
+	}
+	if len(msgs) == 0 {
+		return nil, nats.ErrTimeout
+	}
+	return msgs[0], nil
+}
+
+func normalizeNATSURL(raw string) string {
+	value := strings.TrimSpace(strings.Split(raw, ",")[0])
+	if strings.HasPrefix(value, "nats://") || strings.HasPrefix(value, "tls://") {
+		return value
+	}
+	return "nats://" + value
+}
+
+func streamName(prefix string) string {
+	return strings.ToUpper(strings.NewReplacer(".", "_", "-", "_").Replace(prefix))
+}
+
+func sanitizeConsumerName(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "consumer"
+	}
+	return strings.Map(func(r rune) rune {
+		switch {
+		case unicode.IsLetter(r), unicode.IsDigit(r):
+			return r
+		case r == '-', r == '_':
+			return r
+		default:
+			return '_'
+		}
+	}, value)
 }

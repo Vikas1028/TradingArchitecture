@@ -9,7 +9,7 @@ from collections import defaultdict
 from dataclasses import dataclass
 from datetime import date, datetime, time as dtime, timedelta
 from pathlib import Path
-from typing import Dict, Iterable, Optional
+from typing import Dict, Iterable, Optional, Tuple
 
 from confluent_kafka import Consumer, KafkaError, TopicPartition
 from zoneinfo import ZoneInfo
@@ -69,7 +69,52 @@ def parse_tick_time(value: object) -> Optional[datetime]:
     try:
         return datetime.fromisoformat(text)
     except ValueError:
+        return parse_tick_time_relaxed(text)
+
+
+def parse_tick_time_relaxed(text: str) -> Optional[datetime]:
+    if "." not in text:
         return None
+
+    main, frac = text.split(".", 1)
+    tz_part = ""
+    for marker in ("+", "-"):
+        idx = frac.find(marker)
+        if idx > 0:
+            tz_part = frac[idx:]
+            frac = frac[:idx]
+            break
+
+    digits = "".join(ch for ch in frac if ch.isdigit())
+    if not digits:
+        return None
+
+    normalized = f"{main}.{(digits + '000000')[:6]}{tz_part}"
+    try:
+        return datetime.fromisoformat(normalized)
+    except ValueError:
+        return None
+
+
+def extract_symbol_and_time(payload: object) -> Tuple[str, Optional[datetime]]:
+    if not isinstance(payload, dict):
+        return "", None
+
+    symbol = str(payload.get("symbol") or "").upper()
+    tick_dt = parse_tick_time(payload.get("time"))
+    if symbol and tick_dt is not None:
+        return symbol, tick_dt
+
+    nested_payload = payload.get("payload")
+    if not isinstance(nested_payload, dict):
+        return "", None
+
+    symbol = str(nested_payload.get("symbol") or "").upper()
+    tick_dt = parse_tick_time(nested_payload.get("timestamp"))
+    if symbol and tick_dt is not None:
+        return symbol, tick_dt
+
+    return "", None
 
 
 def get_partitions(consumer: Consumer, topic: str) -> Iterable[int]:
@@ -176,8 +221,7 @@ def consume_day(
                 payload = json.loads(msg.value().decode("utf-8"))
             except Exception:
                 continue
-            symbol = str(payload.get("symbol") or "").upper()
-            tick_dt = parse_tick_time(payload.get("time"))
+            symbol, tick_dt = extract_symbol_and_time(payload)
             if not symbol or tick_dt is None:
                 continue
             tick_local = tick_dt.astimezone(tz)

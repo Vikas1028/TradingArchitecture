@@ -4,76 +4,31 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
+
+	"paper_engine/common"
 )
 
-// KafkaConfig holds Kafka-related settings for the paper engine.
-// It configures bootstrap servers, consumer group, topics, and commit interval.
-type KafkaConfig struct {
-	BootstrapServers string `json:"bootstrap_servers"`
-	GroupID          string `json:"group_id"`
-	SignalsGroupID   string `json:"signals_group_id"`
-	CandlesGroupID   string `json:"candles_group_id"`
+type KafkaConfig = common.KafkaConfig
+type TradingConfig = common.TradingConfig
+type RiskConfig = common.RiskConfig
+type AppConfig = common.AppConfig
 
-	SignalsTopic string `json:"signals_topic"`
-	CandlesTopic string `json:"candles_topic"`
-	TradesTopic  string `json:"trades_topic"`
-	PnlTopic     string `json:"pnl_topic"`
+func LoadConfig(path string) (*common.AppConfig, error) {
+	if strings.TrimSpace(path) == "" {
+		resolvedPath, err := common.ResolveConfigPath()
+		if err != nil {
+			return nil, err
+		}
+		path = resolvedPath
+	}
 
-	CommitIntervalMs      int `json:"commit_interval_ms"`
-	StartupReplayGraceSec int `json:"startup_replay_grace_sec"`
-}
-
-// LogConfig contains logging configuration.
-// Level controls verbosity; File sets the log destination.
-type LogConfig struct {
-	Level string `json:"level"`
-	File  string `json:"file"`
-}
-
-// TradingConfig defines intraday trading settings for the paper engine.
-// Includes timezone, trading window, EOD flat time, and MTM snapshot cadence.
-type TradingConfig struct {
-	Timezone               string `json:"timezone"`
-	EntryStart             string `json:"entry_start"`
-	EntryEnd               string `json:"entry_end"`
-	EODFlatTime            string `json:"eod_flat_time"`
-	MtmSnapshotIntervalSec int    `json:"mtm_snapshot_interval_sec"`
-	PendingSignalMaxAgeSec int    `json:"pending_signal_max_age_sec"`
-}
-
-// RiskConfig defines risk management parameters for the paper engine.
-// Includes capital sizing, trade limits, loss limits, and per-trade SL/target percentages.
-type RiskConfig struct {
-	CapitalPerTrade   float64 `json:"capital_per_trade"`
-	MaxTradesPerDay   int     `json:"max_trades_per_day"`
-	MaxOpenPositions  int     `json:"max_open_positions"`
-	MaxDailyLoss      float64 `json:"max_daily_loss"`
-	PerTradeSLPct     float64 `json:"per_trade_sl_pct"`
-	PerTradeTargetPct float64 `json:"per_trade_target_pct"`
-}
-
-// AppConfig is the root configuration for the paper trading engine.
-// It combines environment, Kafka, logging, trading, and risk settings.
-type AppConfig struct {
-	Env     string        `json:"env"`
-	Kafka   KafkaConfig   `json:"kafka"`
-	Log     LogConfig     `json:"log"`
-	Trading TradingConfig `json:"trading"`
-	Risk    RiskConfig    `json:"risk"`
-}
-
-// LoadConfig loads and validates the paper engine configuration from a JSON path.
-// Inputs: path to JSON config file.
-// Outputs: populated AppConfig or error.
-// Flow: read file, unmarshal, apply defaults, validate required fields, ensure log directory exists.
-func LoadConfig(path string) (*AppConfig, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("read config: %w", err)
 	}
-	var cfg AppConfig
+
+	var cfg common.AppConfig
 	if err := json.Unmarshal(data, &cfg); err != nil {
 		return nil, fmt.Errorf("parse config: %w", err)
 	}
@@ -82,30 +37,36 @@ func LoadConfig(path string) (*AppConfig, error) {
 	if err := validate(&cfg); err != nil {
 		return nil, err
 	}
-	if err := ensureLogDir(cfg.Log.File); err != nil {
-		return nil, err
-	}
 	return &cfg, nil
 }
 
-func applyDefaults(cfg *AppConfig) {
-	if cfg.Kafka.SignalsTopic == "" {
-		cfg.Kafka.SignalsTopic = "signals.strategy"
+func applyDefaults(cfg *common.AppConfig) {
+	if strings.TrimSpace(cfg.Env) == "" {
+		cfg.Env = common.DefaultEnv
 	}
-	if cfg.Kafka.CandlesTopic == "" {
-		cfg.Kafka.CandlesTopic = "candles.1m"
+	if strings.TrimSpace(cfg.Kafka.SignalsTopic) == "" {
+		cfg.Kafka.SignalsTopic = common.DefaultSignalsTopic
 	}
-	if cfg.Kafka.TradesTopic == "" {
-		cfg.Kafka.TradesTopic = "trades.paper"
+	if strings.TrimSpace(cfg.Kafka.CandlesTopic) == "" {
+		cfg.Kafka.CandlesTopic = common.DefaultCandlesTopic
 	}
-	if cfg.Kafka.PnlTopic == "" {
-		cfg.Kafka.PnlTopic = "pnl.paper"
+	if strings.TrimSpace(cfg.Kafka.TicksTopic) == "" {
+		cfg.Kafka.TicksTopic = common.DefaultTicksTopic
+	}
+	if strings.TrimSpace(cfg.Kafka.TradesTopic) == "" {
+		cfg.Kafka.TradesTopic = common.DefaultTradesTopic
+	}
+	if strings.TrimSpace(cfg.Kafka.PnlTopic) == "" {
+		cfg.Kafka.PnlTopic = common.DefaultPnlTopic
 	}
 	if cfg.Kafka.CommitIntervalMs == 0 {
-		cfg.Kafka.CommitIntervalMs = 1000
+		cfg.Kafka.CommitIntervalMs = common.DefaultCommitMs
 	}
 	if cfg.Kafka.StartupReplayGraceSec == 0 {
-		cfg.Kafka.StartupReplayGraceSec = 120
+		cfg.Kafka.StartupReplayGraceSec = common.DefaultReplayGrace
+	}
+	if cfg.Kafka.PriceScaleDivisor <= 0 {
+		cfg.Kafka.PriceScaleDivisor = common.DefaultPriceDivisor
 	}
 	if strings.TrimSpace(cfg.Kafka.SignalsGroupID) == "" {
 		cfg.Kafka.SignalsGroupID = strings.TrimSpace(cfg.Kafka.GroupID)
@@ -119,24 +80,24 @@ func applyDefaults(cfg *AppConfig) {
 			cfg.Kafka.CandlesGroupID += "-candles"
 		}
 	}
-	if cfg.Trading.Timezone == "" {
-		cfg.Trading.Timezone = "Asia/Kolkata"
+	if strings.TrimSpace(cfg.Kafka.TicksGroupID) == "" {
+		cfg.Kafka.TicksGroupID = strings.TrimSpace(cfg.Kafka.GroupID)
+		if cfg.Kafka.TicksGroupID != "" {
+			cfg.Kafka.TicksGroupID += "-ticks"
+		}
+	}
+	if strings.TrimSpace(cfg.Trading.Timezone) == "" {
+		cfg.Trading.Timezone = common.DefaultTimezone
 	}
 	if cfg.Trading.MtmSnapshotIntervalSec == 0 {
-		cfg.Trading.MtmSnapshotIntervalSec = 60
+		cfg.Trading.MtmSnapshotIntervalSec = common.DefaultMTMSnapshot
 	}
 	if cfg.Trading.PendingSignalMaxAgeSec == 0 {
-		cfg.Trading.PendingSignalMaxAgeSec = 180
-	}
-	if strings.TrimSpace(cfg.Log.Level) == "" {
-		cfg.Log.Level = "INFO"
-	}
-	if strings.TrimSpace(cfg.Log.File) == "" {
-		cfg.Log.File = "logs/paper_engine.log"
+		cfg.Trading.PendingSignalMaxAgeSec = common.DefaultSignalMaxAge
 	}
 }
 
-func validate(cfg *AppConfig) error {
+func validate(cfg *common.AppConfig) error {
 	missing := make([]string, 0)
 	if strings.TrimSpace(cfg.Kafka.BootstrapServers) == "" {
 		missing = append(missing, "kafka.bootstrap_servers")
@@ -150,11 +111,14 @@ func validate(cfg *AppConfig) error {
 	if strings.TrimSpace(cfg.Kafka.CandlesGroupID) == "" {
 		missing = append(missing, "kafka.candles_group_id")
 	}
+	if strings.TrimSpace(cfg.Kafka.TicksGroupID) == "" {
+		missing = append(missing, "kafka.ticks_group_id")
+	}
 	if cfg.Kafka.StartupReplayGraceSec < -1 {
 		missing = append(missing, "kafka.startup_replay_grace_sec(>=0 or -1 to disable)")
 	}
-	if strings.TrimSpace(cfg.Log.File) == "" {
-		missing = append(missing, "log.file")
+	if cfg.Kafka.PriceScaleDivisor <= 0 {
+		missing = append(missing, "kafka.price_scale_divisor(>0)")
 	}
 	if strings.TrimSpace(cfg.Trading.EntryStart) == "" {
 		missing = append(missing, "trading.entry_start")
@@ -187,11 +151,4 @@ func validate(cfg *AppConfig) error {
 		return fmt.Errorf("missing/invalid required config fields: %s", strings.Join(missing, ", "))
 	}
 	return nil
-}
-
-func ensureLogDir(path string) error {
-	if path == "" {
-		return nil
-	}
-	return os.MkdirAll(filepath.Dir(path), 0o755)
 }

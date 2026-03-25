@@ -1,0 +1,37 @@
+{
+  "env": "prod",
+  "service": {
+    "bind_address": ":9112",
+    "metrics_path": "/metrics",
+    "dashboard_path": "/dashboard",
+    "health_path": "/health",
+    "events_path": "/events/latest",
+    "signals_path": "/signals/latest",
+    "reaction_path": "/reaction/",
+    "admin_ingest_path": "/admin/ingest"
+  },
+  "broker": {
+    "url": "nats://127.0.0.1:4222",
+    "ticks_subject": "ticks.raw",
+    "candles_subject": "candle.raw",
+    "raw_subject": "news.raw",
+    "normalized_subject": "news.normalized",
+    "classified_subject": "news.classified",
+    "events_subject": "events.stock",
+    "signals_subject": "signals.news",
+    "alerts_subject": "alerts.news"
+  },
+  "symbols": {
+    "aliases": {
+      "HDFCBANK": ["HDFC Bank", "HDFC Bank Ltd"],
+      "RELIANCE": ["Reliance Industries", "Reliance Industries Ltd"],
+      "TCS": ["Tata Consultancy Services", "TCS"],
+      "INFY": ["Infosys", "Infosys Ltd"]
+    }
+  },
+  "rules": {
+    "watch_threshold": 55,
+    "long_threshold": 75,
+    "short_threshold": 75
+  }
+}

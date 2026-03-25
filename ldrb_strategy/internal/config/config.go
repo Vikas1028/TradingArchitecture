@@ -4,139 +4,78 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
+
+	"ldrb_strategy/common"
 )
 
-type KafkaConfig struct {
-	BootstrapServers      string `json:"bootstrap_servers"`
-	GroupID               string `json:"group_id"`
-	StockCandlesTopic     string `json:"stock_candles_topic"`
-	IndexCandlesTopic     string `json:"index_candles_topic"`
-	SignalTopic           string `json:"signal_topic"`
-	CommitIntervalMs      int    `json:"commit_interval_ms"`
-	StartupReplayGraceSec int    `json:"startup_replay_grace_sec"`
-}
+type KafkaConfig = common.KafkaConfig
+type DependenciesConfig = common.DependenciesConfig
+type StrategyConfig = common.StrategyConfig
+type AppConfig = common.AppConfig
 
-type LogConfig struct {
-	Level string `json:"level"`
-	File  string `json:"file"`
-}
+func LoadConfig(path string) (*common.AppConfig, error) {
+	if strings.TrimSpace(path) == "" {
+		resolvedPath, err := common.ResolveConfigPath()
+		if err != nil {
+			return nil, err
+		}
+		path = resolvedPath
+	}
 
-type DependenciesConfig struct {
-	EventsPath             string `json:"events_path"`
-	VolumeProfilePath      string `json:"volume_profile_path"`
-	TurnoverRankingPath    string `json:"turnover_ranking_path"`
-	EnableSafeMode         bool   `json:"enable_safe_mode"`
-	AllowRVOLFallback      bool   `json:"allow_rvol_fallback"`
-	SkipAllIfEventsMissing bool   `json:"skip_all_if_events_missing"`
-}
-
-type StrategyConfig struct {
-	Timezone                 string  `json:"timezone"`
-	SessionStart             string  `json:"session_start"`
-	EntryStart               string  `json:"entry_start"`
-	EntryEnd                 string  `json:"entry_end"`
-	SameDayExitCutoff        string  `json:"same_day_exit_cutoff"`
-	ExitMonitoringEnd        string  `json:"exit_monitoring_end"`
-	Capital                  float64 `json:"capital"`
-	RiskPerTradePct          float64 `json:"risk_per_trade_pct"`
-	MaxTradesPerDay          int     `json:"max_trades_per_day"`
-	MaxOpenOvernight         int     `json:"max_open_overnight"`
-	MaxOvernightRiskPct      float64 `json:"max_overnight_risk_pct"`
-	CapitalUsageCapPct       float64 `json:"capital_usage_cap_pct"`
-	MinPrice                 float64 `json:"min_price"`
-	MaxIntradayMovePct       float64 `json:"max_intraday_move_pct"`
-	BodyRatioMin             float64 `json:"body_ratio_min"`
-	VolumeRatioMin           float64 `json:"volume_ratio_min"`
-	RVOLMin                  float64 `json:"rvol_min"`
-	BreakoutCushionPct       float64 `json:"breakout_cushion_pct"`
-	SecondTryExtraPct        float64 `json:"second_try_extra_pct"`
-	SlippageBufferPct        float64 `json:"slippage_buffer_pct"`
-	MinStopDistancePct       float64 `json:"min_stop_distance_pct"`
-	MaxStopDistancePct       float64 `json:"max_stop_distance_pct"`
-	GapUpPct                 float64 `json:"gap_up_pct"`
-	GapDownPct               float64 `json:"gap_down_pct"`
-	MarketDrawdownLimitPct   float64 `json:"market_drawdown_limit_pct"`
-	LiquidityTopN            int     `json:"liquidity_top_n"`
-	MinPartialFillPct        float64 `json:"min_partial_fill_pct"`
-	RequireSpreadCheck       bool    `json:"require_spread_check"`
-	MaxSpreadPct             float64 `json:"max_spread_pct"`
-	SwingStart               string  `json:"swing_start"`
-	IndexSymbol              string  `json:"index_symbol"`
-	EnableMarketFilter       bool    `json:"enable_market_filter"`
-	EnableEventFilter        bool    `json:"enable_event_filter"`
-	EnableSameDayFailureExit bool    `json:"enable_same_day_failure_exit"`
-}
-
-type AppConfig struct {
-	Env          string             `json:"env"`
-	Kafka        KafkaConfig        `json:"kafka"`
-	Log          LogConfig          `json:"log"`
-	Strategy     StrategyConfig     `json:"strategy"`
-	Dependencies DependenciesConfig `json:"dependencies"`
-}
-
-func LoadConfig(path string) (*AppConfig, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("read config: %w", err)
 	}
-	var cfg AppConfig
+
+	var cfg common.AppConfig
 	if err := json.Unmarshal(data, &cfg); err != nil {
 		return nil, fmt.Errorf("parse config: %w", err)
 	}
+
 	applyDefaults(&cfg)
 	if err := validate(&cfg); err != nil {
-		return nil, err
-	}
-	if err := ensureLogDir(cfg.Log.File); err != nil {
 		return nil, err
 	}
 	return &cfg, nil
 }
 
-func applyDefaults(cfg *AppConfig) {
+func applyDefaults(cfg *common.AppConfig) {
+	if strings.TrimSpace(cfg.Env) == "" {
+		cfg.Env = common.DefaultEnv
+	}
 	if strings.TrimSpace(cfg.Kafka.StockCandlesTopic) == "" {
-		cfg.Kafka.StockCandlesTopic = "candles.1m"
+		cfg.Kafka.StockCandlesTopic = common.DefaultStockTopic
 	}
 	if strings.TrimSpace(cfg.Kafka.IndexCandlesTopic) == "" {
-		cfg.Kafka.IndexCandlesTopic = "indices.1m"
+		cfg.Kafka.IndexCandlesTopic = common.DefaultIndexTopic
 	}
 	if strings.TrimSpace(cfg.Kafka.SignalTopic) == "" {
-		cfg.Kafka.SignalTopic = "signals.strategy"
+		cfg.Kafka.SignalTopic = common.DefaultSignalTopic
 	}
 	if cfg.Kafka.CommitIntervalMs == 0 {
-		cfg.Kafka.CommitIntervalMs = 1000
+		cfg.Kafka.CommitIntervalMs = common.DefaultCommitMs
 	}
 	if cfg.Kafka.StartupReplayGraceSec == 0 {
-		cfg.Kafka.StartupReplayGraceSec = 120
+		cfg.Kafka.StartupReplayGraceSec = common.DefaultReplayGrace
 	}
-
-	if strings.TrimSpace(cfg.Log.Level) == "" {
-		cfg.Log.Level = "INFO"
-	}
-	if strings.TrimSpace(cfg.Log.File) == "" {
-		cfg.Log.File = "logs/ldrb_strategy.log"
-	}
-
 	if strings.TrimSpace(cfg.Strategy.Timezone) == "" {
-		cfg.Strategy.Timezone = "Asia/Kolkata"
+		cfg.Strategy.Timezone = common.DefaultTimezone
 	}
 	if strings.TrimSpace(cfg.Strategy.SessionStart) == "" {
-		cfg.Strategy.SessionStart = "09:15"
+		cfg.Strategy.SessionStart = common.DefaultSessionStart
 	}
 	if strings.TrimSpace(cfg.Strategy.EntryStart) == "" {
-		cfg.Strategy.EntryStart = "14:30"
+		cfg.Strategy.EntryStart = common.DefaultEntryStart
 	}
 	if strings.TrimSpace(cfg.Strategy.EntryEnd) == "" {
-		cfg.Strategy.EntryEnd = "15:15"
+		cfg.Strategy.EntryEnd = common.DefaultEntryEnd
 	}
 	if strings.TrimSpace(cfg.Strategy.SameDayExitCutoff) == "" {
-		cfg.Strategy.SameDayExitCutoff = "15:25"
+		cfg.Strategy.SameDayExitCutoff = common.DefaultSameDayExit
 	}
 	if strings.TrimSpace(cfg.Strategy.ExitMonitoringEnd) == "" {
-		cfg.Strategy.ExitMonitoringEnd = "10:30"
+		cfg.Strategy.ExitMonitoringEnd = common.DefaultMonitorEnd
 	}
 	if cfg.Strategy.Capital == 0 {
 		cfg.Strategy.Capital = 100000
@@ -205,23 +144,20 @@ func applyDefaults(cfg *AppConfig) {
 		cfg.Strategy.MaxSpreadPct = 0.0015
 	}
 	if strings.TrimSpace(cfg.Strategy.SwingStart) == "" {
-		cfg.Strategy.SwingStart = "11:00"
+		cfg.Strategy.SwingStart = common.DefaultSwingStart
 	}
 	if strings.TrimSpace(cfg.Strategy.IndexSymbol) == "" {
-		cfg.Strategy.IndexSymbol = "NIFTY 50"
+		cfg.Strategy.IndexSymbol = common.DefaultIndexSymbol
 	}
 }
 
-func validate(cfg *AppConfig) error {
+func validate(cfg *common.AppConfig) error {
 	missing := make([]string, 0)
 	if strings.TrimSpace(cfg.Kafka.BootstrapServers) == "" {
 		missing = append(missing, "kafka.bootstrap_servers")
 	}
 	if strings.TrimSpace(cfg.Kafka.GroupID) == "" {
 		missing = append(missing, "kafka.group_id")
-	}
-	if strings.TrimSpace(cfg.Log.File) == "" {
-		missing = append(missing, "log.file")
 	}
 	if cfg.Strategy.RiskPerTradePct <= 0 {
 		missing = append(missing, "strategy.risk_per_trade_pct(>0)")
@@ -236,11 +172,4 @@ func validate(cfg *AppConfig) error {
 		return fmt.Errorf("missing/invalid required config fields: %s", strings.Join(missing, ", "))
 	}
 	return nil
-}
-
-func ensureLogDir(path string) error {
-	if path == "" {
-		return nil
-	}
-	return os.MkdirAll(filepath.Dir(path), 0o755)
 }

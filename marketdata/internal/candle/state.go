@@ -19,4 +19,17 @@ type SymbolState struct {
 	CumVol int64
 
 	Initialized bool
+	Frames      map[string]*FrameState
+}
+
+type FrameState struct {
+	Timeframe   string
+	Start       time.Time
+	Open        float64
+	High        float64
+	Low         float64
+	Close       float64
+	Volume      int64
+	VWAP        float64
+	Initialized bool
 }

@@ -11,6 +11,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"marketdata/common"
 	"marketdata/internal/candle"
 	"marketdata/internal/config"
 	"marketdata/internal/kafka"
@@ -21,7 +22,7 @@ import (
 // main is the entrypoint for the market data candle + VWAP builder service.
 // Flow: load config, init logger, ensure topics, wire Kafka consumer/producer, build candles, publish, handle shutdown.
 func main() {
-	configPath := flag.String("config", "config/marketdata_config.json", "path to marketdata config")
+	configPath := flag.String("config", "", "path to marketdata config")
 	flag.Parse()
 	if err := run(*configPath); err != nil {
 		zap.L().Fatal("service exited with error", zap.Error(err))
@@ -37,22 +38,25 @@ func run(configPath string) error {
 		return err
 	}
 
-	logger, err := logging.NewLogger(cfg.Log)
+	logger, err := logging.NewLogger()
 	if err != nil {
 		return err
 	}
 	defer logger.Sync() //nolint:errcheck
 	zap.ReplaceGlobals(logger)
-	_ = metrics.InitAndServeMetrics("9100")
+	_ = metrics.InitAndServeMetrics(common.DefaultMetricsPort)
 	metrics.KafkaInConnected.Set(0)
 	metrics.KafkaOutConnected.Set(0)
 	logger.Info("starting marketdata service",
+		zap.String("app", common.AppName),
+		zap.String("version", common.AppVersion),
 		zap.String("env", cfg.Env),
 		zap.String("bootstrap", cfg.Kafka.BootstrapServers),
 		zap.String("group", cfg.Kafka.GroupID),
 		zap.String("ticks_topic", cfg.Kafka.TicksTopic),
 		zap.String("stock_topic", cfg.Kafka.StockCandlesTopic),
 		zap.String("index_topic", cfg.Kafka.IndexCandlesTopic),
+		zap.Any("timeframe_partitions", common.TimeframePartitions),
 		zap.String("timezone", cfg.Aggregation.Timezone),
 	)
 
@@ -68,12 +72,8 @@ func run(configPath string) error {
 		cancel()
 	}()
 
-	// Ensure required topics exist.
-	if err := kafka.EnsureTopics(ctx, cfg.Kafka.BootstrapServers, []string{
-		cfg.Kafka.TicksTopic,
-		cfg.Kafka.StockCandlesTopic,
-		cfg.Kafka.IndexCandlesTopic,
-	}); err != nil {
+	topics := []string{cfg.Kafka.TicksTopic, cfg.Kafka.StockCandlesTopic, cfg.Kafka.IndexCandlesTopic}
+	if err := kafka.EnsureTopics(ctx, cfg.Kafka.BootstrapServers, topics); err != nil {
 		logger.Warn("failed to ensure topics", zap.Error(err))
 	} else {
 		logger.Info("topics ensured/available")
@@ -102,9 +102,11 @@ func run(configPath string) error {
 	for _, sym := range cfg.Symbols.IndexSymbols {
 		indexSet[strings.ToUpper(sym)] = true
 	}
+	sourceSelector := newSourceSelector(5 * time.Second)
 
-	commitTicker := time.NewTicker(time.Duration(cfg.Kafka.CommitIntervalMs) * time.Millisecond)
-	defer commitTicker.Stop()
+	tickGapTicker := time.NewTicker(1 * time.Second)
+	defer tickGapTicker.Stop()
+	var lastTickTime time.Time
 
 	// Main processing loop.
 	for {
@@ -112,10 +114,11 @@ func run(configPath string) error {
 		case <-ctx.Done():
 			logger.Info("context cancelled; exiting main loop")
 			goto shutdown
-		case <-commitTicker.C:
-			if err := consumer.Commit(); err != nil {
-				logger.Warn("commit failed", zap.Error(err))
-				metrics.ErrorsTotal.Inc()
+		case <-tickGapTicker.C:
+			if lastTickTime.IsZero() {
+				metrics.TickGapSeconds.Set(0)
+			} else {
+				metrics.TickGapSeconds.Set(time.Since(lastTickTime).Seconds())
 			}
 		default:
 			tick, err := consumer.Poll(ctx)
@@ -127,20 +130,33 @@ func run(configPath string) error {
 			if tick == nil {
 				continue
 			}
+			lastTickTime = tick.Time
+			if !sourceSelector.Allow(*tick) {
+				// Lower-priority duplicate source ticks must still be acked or JetStream
+				// will redeliver them forever and eventually stall the consumer.
+				if err := consumer.Commit(); err != nil {
+					logger.Warn("commit failed for filtered tick", zap.Error(err))
+					metrics.ErrorsTotal.Inc()
+				}
+				continue
+			}
 			metrics.TicksConsumedTotal.Inc()
+			metrics.LastTickUnix.Set(float64(tick.Time.Unix()))
+			metrics.TickGapSeconds.Set(time.Since(tick.Time).Seconds())
 			closed := builder.OnTick(*tick)
 			for _, c := range closed {
-				if indexSet[c.Symbol] {
-					if err := producer.PublishIndexCandle(ctx, c); err != nil {
-						logger.Error("publish index candle failed", zap.Error(err), zap.String("symbol", c.Symbol))
-						metrics.ErrorsTotal.Inc()
-					}
-				} else {
-					if err := producer.PublishStockCandle(ctx, c); err != nil {
-						logger.Error("publish stock candle failed", zap.Error(err), zap.String("symbol", c.Symbol))
-						metrics.ErrorsTotal.Inc()
-					}
+				if err := producer.PublishCandle(ctx, c, indexSet[c.Symbol]); err != nil {
+					logger.Error("publish candle failed",
+						zap.Error(err),
+						zap.String("symbol", c.Symbol),
+						zap.String("timeframe", c.Timeframe),
+					)
+					metrics.ErrorsTotal.Inc()
 				}
+			}
+			if err := consumer.Commit(); err != nil {
+				logger.Warn("commit failed", zap.Error(err))
+				metrics.ErrorsTotal.Inc()
 			}
 		}
 	}
@@ -150,14 +166,12 @@ shutdown:
 		flushCtx, cancelFlush := context.WithTimeout(context.Background(), 5*time.Second)
 		candles := builder.FlushAll()
 		for _, c := range candles {
-			if indexSet[c.Symbol] {
-				if err := producer.PublishIndexCandle(flushCtx, c); err != nil {
-					logger.Warn("shutdown publish index candle failed", zap.Error(err), zap.String("symbol", c.Symbol))
-				}
-			} else {
-				if err := producer.PublishStockCandle(flushCtx, c); err != nil {
-					logger.Warn("shutdown publish stock candle failed", zap.Error(err), zap.String("symbol", c.Symbol))
-				}
+			if err := producer.PublishCandle(flushCtx, c, indexSet[c.Symbol]); err != nil {
+				logger.Warn("shutdown publish candle failed",
+					zap.Error(err),
+					zap.String("symbol", c.Symbol),
+					zap.String("timeframe", c.Timeframe),
+				)
 			}
 		}
 		cancelFlush()
@@ -173,4 +187,55 @@ shutdown:
 
 	logger.Info("shutdown complete")
 	return nil
+}
+
+type sourceSelection struct {
+	source       string
+	priority     int
+	lastAccepted time.Time
+}
+
+type sourceSelector struct {
+	staleAfter time.Duration
+	selected   map[string]sourceSelection
+}
+
+func newSourceSelector(staleAfter time.Duration) *sourceSelector {
+	return &sourceSelector{
+		staleAfter: staleAfter,
+		selected:   make(map[string]sourceSelection),
+	}
+}
+
+// Allow keeps one preferred source active per symbol so mixed-source ticks do
+// not create duplicate or conflicting candles when all feeds are alive.
+func (s *sourceSelector) Allow(tick candle.Tick) bool {
+	symbol := strings.ToUpper(strings.TrimSpace(tick.Symbol))
+	if symbol == "" {
+		return false
+	}
+	priority := sourcePriority(tick.Source)
+	current, ok := s.selected[symbol]
+	if !ok || current.source == tick.Source {
+		s.selected[symbol] = sourceSelection{source: tick.Source, priority: priority, lastAccepted: tick.Time}
+		return true
+	}
+	if priority > current.priority || tick.Time.Sub(current.lastAccepted) > s.staleAfter {
+		s.selected[symbol] = sourceSelection{source: tick.Source, priority: priority, lastAccepted: tick.Time}
+		return true
+	}
+	return false
+}
+
+func sourcePriority(source string) int {
+	switch source {
+	case "go_feed":
+		return 3
+	case "go_ltp":
+		return 2
+	case "python_feed_triplex":
+		return 1
+	default:
+		return 0
+	}
 }

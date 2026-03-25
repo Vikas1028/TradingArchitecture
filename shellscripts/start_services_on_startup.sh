@@ -26,6 +26,12 @@ start_launch_agent() {
     log "SKIP ${label}: plist missing at ${plist}"
     return 0
   fi
+  local current_pid
+  current_pid="$(launchctl list | awk -v target="${label}" '$3 == target {print $1}')"
+  if [[ -n "${current_pid}" && "${current_pid}" != "-" && "${current_pid}" != "0" ]]; then
+    log "SKIP ${label}: already running with pid=${current_pid}"
+    return 0
+  fi
   launchctl bootstrap "gui/${USER_ID}" "${plist}" >/dev/null 2>&1 || true
   if launchctl kickstart -k "gui/${USER_ID}/${label}" >/dev/null 2>&1; then
     log "STARTED ${label}"
@@ -62,7 +68,7 @@ else
 fi
 
 # Trading services
-start_launch_agent "com.python_feed.service" "${AGENT_DIR}/com.python_feed.service.plist"
+start_launch_agent "com.python_feed_triplex.service" "${AGENT_DIR}/com.python_feed_triplex.service.plist"
 start_launch_agent "com.marketdata.service" "${AGENT_DIR}/com.marketdata.service.plist"
 start_launch_agent "com.vwap_strategy.service" "${AGENT_DIR}/com.vwap_strategy.service.plist"
 start_launch_agent "com.first_candle_strategy.service" "${AGENT_DIR}/com.first_candle_strategy.service.plist"

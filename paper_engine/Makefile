@@ -9,6 +9,7 @@ release:
 	go build -o $(BINARY_NAME) $(MAIN_PKG)
 	mkdir -p $(RELEASE_DIR)/cmd $(RELEASE_DIR)/config $(RELEASE_DIR)/logs $(RELEASE_DIR)/scripts
 	cp $(BINARY_NAME) $(RELEASE_DIR)/cmd/$(BINARY_NAME)
+	cp cmd/logger.json $(RELEASE_DIR)/cmd/logger.json
 	cp config/paper_engine_config.json $(RELEASE_DIR)/config/paper_engine_config.json
 	cp internal/scripts/paper_engine.properties $(RELEASE_DIR)/scripts/paper_engine.properties
 	cp internal/scripts/start_mac.sh $(RELEASE_DIR)/scripts/start_mac.sh

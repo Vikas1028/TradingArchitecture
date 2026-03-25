@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"flag"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
@@ -10,17 +11,19 @@ import (
 
 	"go.uber.org/zap"
 
+	"paper_engine/common"
 	"paper_engine/internal/config"
+	"paper_engine/internal/dashboard"
 	"paper_engine/internal/engine"
 	"paper_engine/internal/kafka"
 	"paper_engine/internal/logging"
 	"paper_engine/internal/metrics"
 )
 
-// main wires configuration, logging, Kafka IO, and the paper engine, then runs the main loop.
+// main wires configuration, logging, broker IO, and the paper engine, then runs the main loop.
 // Flow: load config, init logger, build consumers/producers, process signals and candles until shutdown.
 func main() {
-	configPath := flag.String("config", "config/paper_engine_config.json", "path to config file")
+	configPath := flag.String("config", "", "path to config file")
 	flag.Parse()
 	if err := run(*configPath); err != nil {
 		zap.L().Fatal("service exited with error", zap.Error(err))
@@ -30,21 +33,32 @@ func main() {
 // run encapsulates service lifecycle and main loop.
 // Inputs: config file path; Outputs: error on fatal failure.
 func run(configPath string) error {
+	startedAt := time.Now()
 	cfg, err := config.LoadConfig(configPath)
 	if err != nil {
 		return err
 	}
 
-	logger, err := logging.NewLogger(cfg.Log)
+	logger, err := logging.NewLogger()
 	if err != nil {
 		return err
 	}
 	defer logger.Sync() //nolint:errcheck
 	zap.ReplaceGlobals(logger)
-	_ = metrics.InitAndServeMetrics("9102")
+	dashboardStore := dashboard.NewStore(startedAt)
+	http.HandleFunc("/dashboard", dashboardStore.Handler)
+	_ = metrics.InitAndServeMetrics(common.DefaultMetricsPort)
 	metrics.TradingHalted.Set(0)
+	metrics.RealizedPnl.Set(0)
+	metrics.UnrealizedPnl.Set(0)
+	metrics.OpenPositions.Set(0)
+	metrics.PendingSignals.Set(0)
+	metrics.TradesToday.Set(0)
+	metrics.MaxDrawdown.Set(0)
 
 	logger.Info("starting paper engine",
+		zap.String("app", common.AppName),
+		zap.String("version", common.AppVersion),
 		zap.String("env", cfg.Env),
 		zap.String("bootstrap", cfg.Kafka.BootstrapServers),
 		zap.String("group", cfg.Kafka.GroupID),
@@ -80,6 +94,12 @@ func run(configPath string) error {
 	}
 	defer candlesConsumer.Close()
 
+	ticksConsumer, err := kafka.NewTicksConsumer(cfg.Kafka, logger)
+	if err != nil {
+		return err
+	}
+	defer ticksConsumer.Close()
+
 	producer, err := kafka.NewEngineProducer(cfg.Kafka, logger)
 	if err != nil {
 		return err
@@ -89,77 +109,124 @@ func run(configPath string) error {
 	if err != nil {
 		return err
 	}
-	candleMinuteForSignal := func(sigTime time.Time) time.Time {
-		return sigTime.In(loc).Truncate(time.Minute)
-	}
 	state := engine.NewEngineState(cfg.Risk, cfg.Trading, loc, logger)
 	core, err := engine.NewEngine(state, logger)
 	if err != nil {
 		return err
 	}
+	dayStart := time.Now().In(loc)
+	dayStart = time.Date(dayStart.Year(), dayStart.Month(), dayStart.Day(), 0, 0, 0, 0, loc)
+	if history, err := kafka.LoadTradeHistory(cfg.Kafka, logger, dayStart); err != nil {
+		logger.Warn("failed to load trade history for recovery", zap.Error(err))
+	} else {
+		core.RestoreTradeHistory(history, time.Now().In(loc))
+	}
+	for _, symbol := range core.OpenSymbols() {
+		if tick, ok := ticksConsumer.LookupLatestTick(symbol); ok && tick != nil {
+			if _, err := core.OnTick(*tick); err != nil {
+				logger.Warn("failed to restore latest tick for open position", zap.Error(err), zap.String("symbol", symbol))
+			}
+		}
+	}
+	counters := dashboardCounters{}
+	connections := map[string]bool{
+		"signals_kafka": true,
+		"candles_kafka": true,
+		"ticks_kafka":   true,
+		"trades_kafka":  true,
+	}
+	refreshDashboard(dashboardStore, core, counters, connections)
 
-	commitTicker := time.NewTicker(time.Duration(cfg.Kafka.CommitIntervalMs) * time.Millisecond)
-	defer commitTicker.Stop()
 	pnlTicker := time.NewTicker(time.Duration(cfg.Trading.MtmSnapshotIntervalSec) * time.Second)
 	defer pnlTicker.Stop()
-	pendingExpiryCheckTicker := time.NewTicker(1 * time.Second)
-	defer pendingExpiryCheckTicker.Stop()
 
 	const pollTimeout = 200 * time.Millisecond
-	pendingSignalMaxAge := time.Duration(cfg.Trading.PendingSignalMaxAgeSec) * time.Second
 
 	for {
 		select {
 		case <-ctx.Done():
 			logger.Info("context cancelled; exiting loop")
 			goto shutdown
-		case <-commitTicker.C:
-			_ = signalsConsumer.Commit()
-			_ = candlesConsumer.Commit()
 		case <-pnlTicker.C:
 			snap := core.BuildPnlSnapshot(time.Now().In(loc))
 			if err := producer.PublishPnlSnapshot(ctx, snap); err != nil {
 				logger.Warn("failed to publish pnl snapshot", zap.Error(err))
 				metrics.ErrorsTotal.Inc()
+				counters.ErrorsTotal++
 			} else {
 				metrics.PnlSnapshotsTotal.Inc()
+				counters.PnlSnapshotsTotal++
 			}
-		case <-pendingExpiryCheckTicker.C:
-			expired := core.DrainExpiredPendingSignals(time.Now().In(loc), pendingSignalMaxAge)
-			for _, pending := range expired {
-				logger.Warn("expired pending signal without pricing candle",
-					zap.String("symbol", pending.Signal.Symbol),
-					zap.Time("signal_time", pending.Signal.Time.In(loc)),
-					zap.Time("queued_at", pending.QueuedAt.In(loc)),
-					zap.Int("max_age_sec", cfg.Trading.PendingSignalMaxAgeSec),
-				)
-			}
+			refreshDashboard(dashboardStore, core, counters, connections)
 		default:
+			tickPollCtx, tickPollCancel := context.WithTimeout(ctx, pollTimeout)
+			tick, err := ticksConsumer.Poll(tickPollCtx)
+			tickPollCancel()
+			if err != nil {
+				logger.Error("ticks poll error", zap.Error(err))
+				metrics.ErrorsTotal.Inc()
+				counters.ErrorsTotal++
+			} else if tick != nil {
+				trade, err := core.OnTick(*tick)
+				if err != nil {
+					logger.Error("OnTick error", zap.Error(err), zap.String("symbol", tick.Symbol))
+					metrics.ErrorsTotal.Inc()
+					counters.ErrorsTotal++
+				} else if trade != nil {
+					if err := producer.PublishTrade(ctx, *trade); err != nil {
+						metrics.ErrorsTotal.Inc()
+						counters.ErrorsTotal++
+					} else {
+						metrics.TradesEmittedTotal.Inc()
+						counters.TradesEmittedTotal++
+					}
+				}
+				counters.TicksConsumedTotal++
+				_ = ticksConsumer.Commit()
+			}
+
 			sigPollCtx, sigPollCancel := context.WithTimeout(ctx, pollTimeout)
 			sig, err := signalsConsumer.Poll(sigPollCtx)
 			sigPollCancel()
 			if err != nil {
 				logger.Error("signals poll error", zap.Error(err))
 				metrics.ErrorsTotal.Inc()
+				counters.ErrorsTotal++
 			} else if sig != nil {
 				metrics.SignalsConsumedTotal.Inc()
-				latest := core.GetLatestCandleForSymbol(sig.Symbol)
-				if latest == nil || latest.Time.In(loc).Before(candleMinuteForSignal(sig.Time)) {
-					core.QueueSignal(*sig, time.Now().In(loc))
-					logger.Debug("queued signal until pricing candle is available",
-						zap.String("symbol", sig.Symbol),
-						zap.Time("signal_time", sig.Time.In(loc)),
-					)
-				} else if trade, err := core.OnSignal(*sig, latest); err != nil {
-					logger.Error("OnSignal error", zap.Error(err), zap.String("symbol", sig.Symbol))
-					metrics.ErrorsTotal.Inc()
+				counters.SignalsConsumedTotal++
+				entryPrice, ok := core.GetLatestPriceForSymbol(sig.Symbol)
+				if !ok {
+					if latest := core.GetLatestCandleForSymbol(sig.Symbol); latest != nil {
+						entryPrice = latest.Close
+						ok = entryPrice > 0
+					}
+				}
+				if !ok {
+					if lookedUp, found := ticksConsumer.LookupLatestPrice(sig.Symbol); found {
+						entryPrice = lookedUp
+						ok = true
+					}
+				}
+				if trade, err := core.OnSignal(*sig, entryPrice); err != nil {
+					if err.Error() == "invalid entry price" {
+						core.QueueSignal(*sig, time.Now().In(loc))
+						logger.Info("queued signal until first live tick is available", zap.String("symbol", sig.Symbol))
+					} else {
+						logger.Error("OnSignal error", zap.Error(err), zap.String("symbol", sig.Symbol))
+						metrics.ErrorsTotal.Inc()
+						counters.ErrorsTotal++
+					}
 				} else if trade != nil {
 					if err := producer.PublishTrade(ctx, *trade); err != nil {
 						metrics.ErrorsTotal.Inc()
+						counters.ErrorsTotal++
 					} else {
 						metrics.TradesEmittedTotal.Inc()
+						counters.TradesEmittedTotal++
 					}
 				}
+				_ = signalsConsumer.Commit()
 			}
 
 			candlePollCtx, candlePollCancel := context.WithTimeout(ctx, pollTimeout)
@@ -168,35 +235,27 @@ func run(configPath string) error {
 			if err != nil {
 				logger.Error("candles poll error", zap.Error(err))
 				metrics.ErrorsTotal.Inc()
+				counters.ErrorsTotal++
 			} else if candle != nil {
 				core.UpdateLatestCandle(*candle)
 				trades, err := core.OnCandle(*candle)
 				if err != nil {
 					logger.Error("OnCandle error", zap.Error(err), zap.String("symbol", candle.Symbol))
 					metrics.ErrorsTotal.Inc()
+					counters.ErrorsTotal++
 				}
 				for _, tr := range trades {
 					if err := producer.PublishTrade(ctx, tr); err != nil {
 						metrics.ErrorsTotal.Inc()
+						counters.ErrorsTotal++
 					} else {
 						metrics.TradesEmittedTotal.Inc()
+						counters.TradesEmittedTotal++
 					}
 				}
-				if pending := core.ConsumePendingSignal(candle.Symbol); pending != nil {
-					latest := core.GetLatestCandleForSymbol(pending.Symbol)
-					if trade, err := core.OnSignal(*pending, latest); err != nil {
-						logger.Error("pending OnSignal error", zap.Error(err), zap.String("symbol", pending.Symbol))
-						metrics.ErrorsTotal.Inc()
-					} else if trade != nil {
-						if err := producer.PublishTrade(ctx, *trade); err != nil {
-							metrics.ErrorsTotal.Inc()
-						} else {
-							metrics.TradesEmittedTotal.Inc()
-							logger.Info("executed queued signal", zap.String("symbol", trade.Symbol))
-						}
-					}
-				}
+				_ = candlesConsumer.Commit()
 			}
+			refreshDashboard(dashboardStore, core, counters, connections)
 		}
 	}
 
@@ -206,13 +265,96 @@ shutdown:
 	if err := producer.PublishPnlSnapshot(publishCtx, snap); err != nil {
 		logger.Warn("failed to publish final pnl snapshot", zap.Error(err))
 		metrics.ErrorsTotal.Inc()
+		counters.ErrorsTotal++
 	} else {
 		metrics.PnlSnapshotsTotal.Inc()
+		counters.PnlSnapshotsTotal++
 	}
 	cancelPublish()
 	if err := producer.Flush(5 * time.Second); err != nil {
 		logger.Warn("producer flush failed", zap.Error(err))
 	}
+	refreshDashboard(dashboardStore, core, counters, connections)
 	logger.Info("shutdown complete")
 	return nil
+}
+
+type dashboardCounters struct {
+	SignalsConsumedTotal uint64
+	TradesEmittedTotal   uint64
+	PnlSnapshotsTotal    uint64
+	ErrorsTotal          uint64
+	TicksConsumedTotal   uint64
+}
+
+// refreshDashboard snapshots the current engine state into the HTTP dashboard model.
+func refreshDashboard(store *dashboard.Store, core *engine.Engine, counters dashboardCounters, connections map[string]bool) {
+	pnl := core.BuildPnlSnapshot(time.Now())
+	store.Update(common.DashboardSnapshot{
+		ConnectionStatus: cloneConnections(connections),
+		QueueDepth:       map[string]int{},
+		Reconnects:       map[string]uint64{},
+		Metrics: map[string]float64{
+			"paper_engine_signals_consumed_total": float64(counters.SignalsConsumedTotal),
+			"paper_engine_trades_emitted_total":   float64(counters.TradesEmittedTotal),
+			"paper_engine_pnl_snapshots_total":    float64(counters.PnlSnapshotsTotal),
+			"paper_engine_errors_total":           float64(counters.ErrorsTotal),
+			"paper_engine_open_positions":         float64(pnl.OpenPositions),
+			"paper_engine_pending_signals":        0,
+			"paper_engine_trades_today":           float64(pnl.TradesToday),
+			"paper_engine_realized_pnl":           pnl.RealizedPnl,
+			"paper_engine_unrealized_pnl":         pnl.UnrealizedPnl,
+			"paper_engine_max_drawdown":           pnl.MaxDrawdown,
+			"paper_engine_trading_halted":         boolFloat(pnl.TradingHalted),
+			"paper_engine_ticks_consumed_total":   float64(counters.TicksConsumedTotal),
+		},
+		RunningTrades: buildRunningTradeSnapshots(core.BuildRunningTrades()),
+	})
+}
+
+// buildRunningTradeSnapshots converts internal engine rows to the dashboard schema.
+func buildRunningTradeSnapshots(rows []engine.RunningTrade) []common.RunningTradeSnapshot {
+	out := make([]common.RunningTradeSnapshot, 0, len(rows))
+	for _, row := range rows {
+		lastPrice := row.LastPrice
+		unrealizedPnl := row.UnrealizedPnl
+		if lastPrice <= 0 {
+			lastPrice = row.EntryPrice
+			unrealizedPnl = 0
+		}
+		investedAmount := row.EntryPrice * float64(row.Quantity)
+		unrealizedPnlPct := 0.0
+		if investedAmount > 0 {
+			unrealizedPnlPct = (unrealizedPnl / investedAmount) * 100
+		}
+		out = append(out, common.RunningTradeSnapshot{
+			Symbol:           row.Symbol,
+			Strategy:         row.Strategy,
+			Side:             row.Side,
+			Quantity:         row.Quantity,
+			EntryPrice:       row.EntryPrice,
+			LastPrice:        lastPrice,
+			InvestedAmount:   investedAmount,
+			UnrealizedPnl:    unrealizedPnl,
+			UnrealizedPnlPct: unrealizedPnlPct,
+			EntryTime:        row.EntryTime,
+			LastTickTime:     row.LastTickTime,
+		})
+	}
+	return out
+}
+
+func cloneConnections(values map[string]bool) map[string]bool {
+	cloned := make(map[string]bool, len(values))
+	for key, value := range values {
+		cloned[key] = value
+	}
+	return cloned
+}
+
+func boolFloat(value bool) float64 {
+	if value {
+		return 1
+	}
+	return 0
 }

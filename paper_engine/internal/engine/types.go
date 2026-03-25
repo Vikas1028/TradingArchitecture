@@ -27,14 +27,21 @@ type PendingSignal struct {
 
 // Candle represents a 1-minute OHLCV bar used for paper execution and MTM.
 type Candle struct {
+	Symbol    string    `json:"symbol"`
+	Time      time.Time `json:"time"`
+	Timeframe string    `json:"timeframe"`
+	Open      float64   `json:"open"`
+	High      float64   `json:"high"`
+	Low       float64   `json:"low"`
+	Close     float64   `json:"close"`
+	Volume    int64     `json:"volume"`
+	VWAP      float64   `json:"vwap"`
+}
+
+type Tick struct {
 	Symbol string    `json:"symbol"`
 	Time   time.Time `json:"time"`
-	Open   float64   `json:"open"`
-	High   float64   `json:"high"`
-	Low    float64   `json:"low"`
-	Close  float64   `json:"close"`
-	Volume int64     `json:"volume"`
-	VWAP   float64   `json:"vwap"`
+	LTP    float64   `json:"ltp"`
 }
 
 // PositionSide describes the side of an open position.
@@ -42,17 +49,18 @@ type PositionSide string
 
 const (
 	SideLong PositionSide = "LONG"
+	SideShort PositionSide = "SHORT"
 )
 
 // Position represents a single-symbol intraday position (v1: LONG-only).
 type Position struct {
-	Symbol     string        `json:"symbol"`
-	Side       PositionSide  `json:"side"`
-	Quantity   int64         `json:"quantity"`
-	AvgEntry   float64       `json:"avg_entry"`
-	EntryTime  time.Time     `json:"entry_time"`
-	Strategy   string        `json:"strategy"`
-	LastCandle *Candle       `json:"-"`
+	Symbol     string       `json:"symbol"`
+	Side       PositionSide `json:"side"`
+	Quantity   int64        `json:"quantity"`
+	AvgEntry   float64      `json:"avg_entry"`
+	EntryTime  time.Time    `json:"entry_time"`
+	Strategy   string       `json:"strategy"`
+	LastCandle *Candle      `json:"-"`
 }
 
 // TradeType classifies whether the trade is an entry or exit.
@@ -87,4 +95,16 @@ type PnlSnapshot struct {
 	MaxDrawdown       float64   `json:"max_drawdown"`
 	MaxDailyLossLimit float64   `json:"max_daily_loss_limit"`
 	TradingHalted     bool      `json:"trading_halted"`
+}
+
+type RunningTrade struct {
+	Symbol        string    `json:"symbol"`
+	Strategy      string    `json:"strategy"`
+	Side          string    `json:"side"`
+	Quantity      int64     `json:"quantity"`
+	EntryPrice    float64   `json:"entry_price"`
+	LastPrice     float64   `json:"last_price"`
+	UnrealizedPnl float64   `json:"unrealized_pnl"`
+	EntryTime     time.Time `json:"entry_time"`
+	LastTickTime  time.Time `json:"last_tick_time"`
 }

@@ -1,17 +1,13 @@
 {
   "env": "prod",
   "kafka": {
-    "bootstrap_servers": "localhost:9092",
+    "bootstrap_servers": "nats://127.0.0.1:4222",
     "group_id": "vwap-strategy",
-    "stock_candles_topic": "candles.1m",
-    "index_candles_topic": "indices.1m",
+    "stock_candles_topic": "candle.raw",
+    "index_candles_topic": "indices.raw",
     "signal_topic": "signals.strategy",
     "commit_interval_ms": 1000,
     "startup_replay_grace_sec": 120
-  },
-  "log": {
-    "level": "DEBUG",
-    "file": "logs/vwap_strategy.log"
   },
   "strategy": {
     "timezone": "Asia/Kolkata",

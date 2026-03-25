@@ -1,20 +1,19 @@
 {
   "env": "prod",
   "kafka": {
-    "bootstrap_servers": "localhost:9092",
-    "group_id": "paper-engine",
-    "signals_group_id": "paper-engine-signals",
-    "candles_group_id": "paper-engine-candles",
+    "bootstrap_servers": "nats://127.0.0.1:4222",
+    "group_id": "paper-engine-v2",
+    "signals_group_id": "paper-engine-signals-v5",
+    "candles_group_id": "paper-engine-candles-v3",
+    "ticks_group_id": "paper-engine-ticks-v2",
     "signals_topic": "signals.strategy",
-    "candles_topic": "candles.1m",
+    "candles_topic": "candle.raw",
+    "ticks_topic": "ticks.raw",
     "trades_topic": "trades.paper",
     "pnl_topic": "pnl.paper",
     "commit_interval_ms": 1000,
-    "startup_replay_grace_sec": -1
-  },
-  "log": {
-    "level": "DEBUG",
-    "file": "logs/paper_engine.log"
+    "startup_replay_grace_sec": 300,
+    "price_scale_divisor": 1.0
   },
   "trading": {
     "timezone": "Asia/Kolkata",

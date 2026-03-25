@@ -5,14 +5,15 @@ import "time"
 // Candle represents a 1-minute OHLCV bar consumed from Kafka.
 // It is the input unit for the first-candle reversal detector.
 type Candle struct {
-	Symbol string    `json:"symbol"`
-	Time   time.Time `json:"time"`
-	Open   float64   `json:"open"`
-	High   float64   `json:"high"`
-	Low    float64   `json:"low"`
-	Close  float64   `json:"close"`
-	Volume int64     `json:"volume"`
-	VWAP   float64   `json:"vwap"`
+	Symbol    string    `json:"symbol"`
+	Time      time.Time `json:"time"`
+	Timeframe string    `json:"timeframe"`
+	Open      float64   `json:"open"`
+	High      float64   `json:"high"`
+	Low       float64   `json:"low"`
+	Close     float64   `json:"close"`
+	Volume    int64     `json:"volume"`
+	VWAP      float64   `json:"vwap"`
 }
 
 // SignalSide describes the direction of a strategy signal.

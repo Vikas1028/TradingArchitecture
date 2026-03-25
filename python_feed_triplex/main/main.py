@@ -14,6 +14,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
+from python_feed_triplex.common import constants
+from python_feed_triplex.common.path import resolve_config_path
 from python_feed_triplex.internal.config.config_loader import load_config
 from python_feed_triplex.internal.kafka.kafka_producer import KafkaTickProducer
 from python_feed_triplex.internal.login.smartapi_login import create_angel_client
@@ -21,7 +23,7 @@ from python_feed_triplex.internal.logging.logger_setup import setup_logging
 from python_feed_triplex.internal.websocket.angel_ws_client import AngelWSClient
 from python_feed_triplex import metrics
 
-DEFAULT_CONFIG_PATH = Path(__file__).resolve().parents[1] / "config" / "ws_feed_config.json"
+DEFAULT_CONFIG_PATH = resolve_config_path()
 
 
 # _derive_symbol normalizes configured instrument identifiers to (symbol, exchange).
@@ -328,6 +330,10 @@ class WSWorker:
         self._total_ticks = 0
         self._connected = False
 
+    def _set_connected(self, connected: bool) -> None:
+        with self._state_lock:
+            self._connected = connected
+
     def start(self) -> None:
         if self._thread and self._thread.is_alive():
             return
@@ -353,18 +359,6 @@ class WSWorker:
         with self._state_lock:
             return self._connected
 
-    def tick_age_seconds(self) -> float:
-        with self._state_lock:
-            return time.monotonic() - self._last_tick_mono
-
-    def uptime_seconds(self) -> float:
-        with self._state_lock:
-            return max(0.0, time.monotonic() - self._started_at)
-
-    def total_ticks(self) -> int:
-        with self._state_lock:
-            return self._total_ticks
-
     def _on_tick(self, tick: Dict[str, Any]) -> None:
         with self._state_lock:
             self._last_tick_mono = time.monotonic()
@@ -381,11 +375,10 @@ class WSWorker:
                 token_mapping=self.token_map,
                 instrument_token_map=self.instrument_token_map,
                 connection_id=self.name,
+                state_handler=self._set_connected,
             )
             try:
                 client.connect()
-                with self._state_lock:
-                    self._connected = True
                 client.run_forever(self.stop_event)
                 with self._state_lock:
                     self._connected = False
@@ -404,7 +397,7 @@ class WSWorker:
 
 
 class MultiWSManager:
-    """Manages three fixed websocket workers."""
+    """Manages one websocket worker for the full Nifty 500 universe."""
 
     def __init__(
         self,
@@ -426,7 +419,7 @@ class MultiWSManager:
             ttl_sec=int(reconnect_cfg.get("dedupe_ttl_sec", 10)),
             logger=logger,
         )
-        self.worker_names: List[str] = ["ws-a", "ws-b", "ws-c"]
+        self.worker_names: List[str] = ["ws-a"]
         for client in self.worker_names:
             metrics.WS_CLIENT_CONNECTED.labels(client=client).set(0)
             metrics.WS_CLIENT_LAST_CONNECT_UNIX.labels(client=client).set(0)
@@ -490,12 +483,13 @@ class MultiWSManager:
 # Flow: load config, set up logging/producer/health/client, install signals, run reconnect loop with backoff, flush on exit.
 def main() -> None:
     parser = argparse.ArgumentParser(description="Angel SmartAPI websocket -> Kafka tick forwarder")
-    parser.add_argument("--config", default=str(DEFAULT_CONFIG_PATH), help="Path to ws_feed_config.json")
+    parser.add_argument("--config", default="", help="Path to ws_feed_config.json")
     args = parser.parse_args()
 
     cfg = load_config(args.config)
-    logger = setup_logging(cfg["log"].get("level", "INFO"), cfg["log"].get("file", "logs/ws_feed_service.log"))
+    logger = setup_logging(cfg.get("log", {}).get("level", "INFO"))
     logger.info("Configuration loaded from %s", args.config)
+    logger.info("starting python feed service app=%s version=%s", constants.APP_NAME, constants.APP_VERSION)
     metrics_cfg = cfg.get("metrics", {})
     metrics_port = int(metrics_cfg.get("port", 9001))
     metrics.start_metrics_server(metrics_port)

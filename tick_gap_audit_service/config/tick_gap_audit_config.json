@@ -1,0 +1,15 @@
+{
+  "kafka": {
+    "bootstrap_servers": "localhost:9092",
+    "topic": "ticks.raw",
+    "group_id": "tick-gap-audit-service"
+  },
+  "app": {
+    "timezone": "Asia/Kolkata",
+    "output_dir": "/Users/vikasbhandekar/Desktop/TradingArchitecture/tick_gap_audit_service",
+    "poll_timeout_ms": 1000,
+    "max_idle_polls": 20,
+    "min_gap_seconds": 5,
+    "symbols": []
+  }
+}
