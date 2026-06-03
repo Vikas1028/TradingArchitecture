@@ -134,6 +134,24 @@ func applyDefaults(cfg *common.AppConfig) {
 	if cfg.Strategy.TrailingFreezeProfitPct <= 0 {
 		cfg.Strategy.TrailingFreezeProfitPct = common.DefaultTrailingFreezePct
 	}
+	if strings.TrimSpace(cfg.Strategy.FallbackEvaluateAt) == "" {
+		cfg.Strategy.FallbackEvaluateAt = common.DefaultFallbackEvaluateAt
+	}
+	if cfg.Strategy.FallbackMinPositivePct <= 0 {
+		cfg.Strategy.FallbackMinPositivePct = common.DefaultFallbackMinMovePct
+	}
+	if cfg.Strategy.FallbackMaxBaselineSec <= 0 {
+		cfg.Strategy.FallbackMaxBaselineSec = common.DefaultFallbackBaselineSec
+	}
+	if cfg.Strategy.FallbackMaxLastTickSec <= 0 {
+		cfg.Strategy.FallbackMaxLastTickSec = common.DefaultFallbackLastTickSec
+	}
+	if cfg.Strategy.FallbackMaxPublishSec <= 0 {
+		cfg.Strategy.FallbackMaxPublishSec = common.DefaultFallbackPublishSec
+	}
+	if strings.TrimSpace(cfg.Strategy.FallbackStrategyName) == "" {
+		cfg.Strategy.FallbackStrategyName = common.DefaultFallbackStrategy
+	}
 	if strings.TrimSpace(cfg.Service.MetricsAddress) == "" {
 		cfg.Service.MetricsAddress = common.DefaultMetricsPort
 		if !strings.HasPrefix(cfg.Service.MetricsAddress, ":") {

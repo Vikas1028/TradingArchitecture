@@ -36,16 +36,17 @@ type strategy4State struct {
 }
 
 type symbolState struct {
-	OpenPrice        float64
-	LastPrice        float64
-	LastTickTime     time.Time
-	LastSource       string
-	CurrentMinute    minuteState
-	PreviousMinute   minuteState
-	Strategy1        strategy1State
-	Strategy4        strategy4State
-	TradeDate        string
-	LastSignalMinute time.Time
+	OpenPrice          float64
+	LastPrice          float64
+	LastTickTime       time.Time
+	LastSource         string
+	CurrentMinute      minuteState
+	PreviousMinute     minuteState
+	Strategy1          strategy1State
+	Strategy4          strategy4State
+	TradeDate          string
+	LastSignalMinute   time.Time
+	LastStrategySignal map[string]time.Time
 }
 
 type Engine struct {
@@ -63,6 +64,7 @@ type Engine struct {
 	s4Count        int
 	s2MinuteCount  map[string]int
 	tradeDate      string
+	openTrades     map[string]struct{}
 }
 
 func NewEngine(cfg EngineConfig) (*Engine, error) {
@@ -75,6 +77,7 @@ func NewEngine(cfg EngineConfig) (*Engine, error) {
 		loc:           loc,
 		symbols:       make(map[string]*symbolState),
 		s2MinuteCount: make(map[string]int),
+		openTrades:    make(map[string]struct{}),
 	}, nil
 }
 
@@ -115,6 +118,7 @@ func (e *Engine) ensureTradeDate(now time.Time) {
 	e.s4Count = 0
 	e.s2MinuteCount = make(map[string]int)
 	e.symbols = make(map[string]*symbolState)
+	e.openTrades = make(map[string]struct{})
 }
 
 func (e *Engine) stateFor(symbol string) *symbolState {
@@ -122,7 +126,7 @@ func (e *Engine) stateFor(symbol string) *symbolState {
 	if ok {
 		return state
 	}
-	state = &symbolState{}
+	state = &symbolState{LastStrategySignal: make(map[string]time.Time)}
 	e.symbols[symbol] = state
 	return state
 }
@@ -195,11 +199,11 @@ func (e *Engine) evaluateStrategy1(tick common.Tick, state *symbolState, now tim
 	}
 	if state.Strategy1.SeenDipBelowOpen && tick.LTP >= state.OpenPrice*(1+e.cfg.Strategy.ReturnTolerancePct/100) {
 		e.s1Count++
-		return e.emit("fast_movers_stratergy_s1_open_reclaim", tick.Symbol, "BUY", now, fmt.Sprintf("S1 BUY open=%.2f reclaimed after dip", state.OpenPrice), e.cfg.Strategy.DefaultStopLossPct, e.cfg.Strategy.DefaultTargetPct), true
+		return e.emitIfAllowed(state, "fast_movers_stratergy_s1_open_reclaim", tick.Symbol, "BUY", now, fmt.Sprintf("S1 BUY open=%.2f reclaimed after dip", state.OpenPrice), e.cfg.Strategy.DefaultStopLossPct, e.cfg.Strategy.DefaultTargetPct)
 	}
 	if state.Strategy1.SeenRallyAboveOpen && tick.LTP <= state.OpenPrice*(1-e.cfg.Strategy.ReturnTolerancePct/100) {
 		e.s1Count++
-		return e.emit("fast_movers_stratergy_s1_open_reclaim", tick.Symbol, "SELL", now, fmt.Sprintf("S1 SELL open=%.2f reversed after rally", state.OpenPrice), e.cfg.Strategy.DefaultStopLossPct, e.cfg.Strategy.DefaultTargetPct), true
+		return e.emitIfAllowed(state, "fast_movers_stratergy_s1_open_reclaim", tick.Symbol, "SELL", now, fmt.Sprintf("S1 SELL open=%.2f reversed after rally", state.OpenPrice), e.cfg.Strategy.DefaultStopLossPct, e.cfg.Strategy.DefaultTargetPct)
 	}
 	return common.Signal{}, false
 }
@@ -220,7 +224,7 @@ func (e *Engine) evaluateStrategy2(tick common.Tick, state *symbolState, now tim
 		}
 		if now.Sub(state.CurrentMinute.BurstStart) >= time.Duration(e.cfg.Strategy.BurstConfirmationSec)*time.Second {
 			e.s2MinuteCount[minuteKey]++
-			return e.emit("fast_movers_stratergy_s2_30sec_burst", tick.Symbol, "BUY", now, fmt.Sprintf("S2 BUY minute=%s open=%.2f moved %.2f%% up within %ds", minuteKey, state.OpenPrice, upMove, e.cfg.Strategy.BurstConfirmationSec), e.cfg.Strategy.DefaultStopLossPct, e.cfg.Strategy.DefaultTargetPct), true
+			return e.emitIfAllowed(state, "fast_movers_stratergy_s2_30sec_burst", tick.Symbol, "BUY", now, fmt.Sprintf("S2 BUY minute=%s open=%.2f moved %.2f%% up within %ds", minuteKey, state.OpenPrice, upMove, e.cfg.Strategy.BurstConfirmationSec), e.cfg.Strategy.DefaultStopLossPct, e.cfg.Strategy.DefaultTargetPct)
 		}
 	}
 	if downMove >= e.cfg.Strategy.BurstTriggerPct {
@@ -229,7 +233,7 @@ func (e *Engine) evaluateStrategy2(tick common.Tick, state *symbolState, now tim
 		}
 		if now.Sub(state.CurrentMinute.BurstStart) >= time.Duration(e.cfg.Strategy.BurstConfirmationSec)*time.Second {
 			e.s2MinuteCount[minuteKey]++
-			return e.emit("fast_movers_stratergy_s2_30sec_burst", tick.Symbol, "SELL", now, fmt.Sprintf("S2 SELL minute=%s open=%.2f moved %.2f%% down within %ds", minuteKey, state.OpenPrice, downMove, e.cfg.Strategy.BurstConfirmationSec), e.cfg.Strategy.DefaultStopLossPct, e.cfg.Strategy.DefaultTargetPct), true
+			return e.emitIfAllowed(state, "fast_movers_stratergy_s2_30sec_burst", tick.Symbol, "SELL", now, fmt.Sprintf("S2 SELL minute=%s open=%.2f moved %.2f%% down within %ds", minuteKey, state.OpenPrice, downMove, e.cfg.Strategy.BurstConfirmationSec), e.cfg.Strategy.DefaultStopLossPct, e.cfg.Strategy.DefaultTargetPct)
 		}
 	}
 	return common.Signal{}, false
@@ -243,11 +247,11 @@ func (e *Engine) evaluateStrategy3(tick common.Tick, state *symbolState, now tim
 	currMove := candleMovePct(state.CurrentMinute.Open, state.CurrentMinute.Close)
 	if prevMove >= e.cfg.Strategy.TwoCandleMinMovePct && currMove >= e.cfg.Strategy.TwoCandleMinMovePct {
 		e.s3Count++
-		return e.emit("fast_movers_stratergy_s3_two_candle", tick.Symbol, "BUY", now, "S3 BUY first two 1m candles strong up", e.cfg.Strategy.DefaultStopLossPct, e.cfg.Strategy.DefaultTargetPct), true
+		return e.emitIfAllowed(state, "fast_movers_stratergy_s3_two_candle", tick.Symbol, "BUY", now, "S3 BUY first two 1m candles strong up", e.cfg.Strategy.DefaultStopLossPct, e.cfg.Strategy.DefaultTargetPct)
 	}
 	if prevMove <= -e.cfg.Strategy.TwoCandleMinMovePct && currMove <= -e.cfg.Strategy.TwoCandleMinMovePct {
 		e.s3Count++
-		return e.emit("fast_movers_stratergy_s3_two_candle", tick.Symbol, "SELL", now, "S3 SELL first two 1m candles strong down", e.cfg.Strategy.DefaultStopLossPct, e.cfg.Strategy.DefaultTargetPct), true
+		return e.emitIfAllowed(state, "fast_movers_stratergy_s3_two_candle", tick.Symbol, "SELL", now, "S3 SELL first two 1m candles strong down", e.cfg.Strategy.DefaultStopLossPct, e.cfg.Strategy.DefaultTargetPct)
 	}
 	return common.Signal{}, false
 }
@@ -258,11 +262,11 @@ func (e *Engine) evaluateStrategy4(tick common.Tick, state *symbolState, now tim
 	}
 	if state.Strategy4.OpeningRangeHigh > 0 && pctUp(state.Strategy4.OpeningRangeHigh, tick.LTP) >= e.cfg.Strategy.S4ConfirmPct {
 		e.s4Count++
-		return e.emit("fast_movers_stratergy_s4_orb_retest", tick.Symbol, "BUY", now, fmt.Sprintf("S4 BUY ORB-retest ORH=%.2f broke and reconfirmed", state.Strategy4.OpeningRangeHigh), e.cfg.Strategy.S4StopLossPct, e.cfg.Strategy.S4TargetPct), true
+		return e.emitIfAllowed(state, "fast_movers_stratergy_s4_orb_retest", tick.Symbol, "BUY", now, fmt.Sprintf("S4 BUY ORB-retest ORH=%.2f broke and reconfirmed", state.Strategy4.OpeningRangeHigh), e.cfg.Strategy.S4StopLossPct, e.cfg.Strategy.S4TargetPct)
 	}
 	if state.Strategy4.OpeningRangeLow > 0 && pctDown(state.Strategy4.OpeningRangeLow, tick.LTP) >= e.cfg.Strategy.S4ConfirmPct {
 		e.s4Count++
-		return e.emit("fast_movers_stratergy_s4_orb_retest", tick.Symbol, "SELL", now, fmt.Sprintf("S4 SELL ORB-retest ORL=%.2f broke and reconfirmed", state.Strategy4.OpeningRangeLow), e.cfg.Strategy.S4StopLossPct, e.cfg.Strategy.S4TargetPct), true
+		return e.emitIfAllowed(state, "fast_movers_stratergy_s4_orb_retest", tick.Symbol, "SELL", now, fmt.Sprintf("S4 SELL ORB-retest ORL=%.2f broke and reconfirmed", state.Strategy4.OpeningRangeLow), e.cfg.Strategy.S4StopLossPct, e.cfg.Strategy.S4TargetPct)
 	}
 	return common.Signal{}, false
 }
@@ -289,6 +293,39 @@ func (e *Engine) emit(strategyName, symbol, side string, now time.Time, reason s
 		TargetPct:               target,
 		TrailingStopPct:         e.cfg.Strategy.TrailingStopStepPct,
 		TrailingFreezeProfitPct: e.cfg.Strategy.TrailingFreezeProfitPct,
+	}
+}
+
+func (e *Engine) emitIfAllowed(state *symbolState, strategyName, symbol, side string, now time.Time, reason string, stopLoss, target float64) (common.Signal, bool) {
+	symbol = strings.ToUpper(strings.TrimSpace(symbol))
+	if _, exists := e.openTrades[symbol]; exists {
+		return common.Signal{}, false
+	}
+	if e.cfg.Strategy.MaxOpenTrades > 0 && len(e.openTrades) >= e.cfg.Strategy.MaxOpenTrades {
+		return common.Signal{}, false
+	}
+	if state != nil {
+		minute := now.Truncate(time.Minute)
+		if last, ok := state.LastStrategySignal[strategyName]; ok && last.Equal(minute) {
+			return common.Signal{}, false
+		}
+		state.LastStrategySignal[strategyName] = minute
+	}
+	e.openTrades[symbol] = struct{}{}
+	return e.emit(strategyName, symbol, side, now, reason, stopLoss, target), true
+}
+
+func (e *Engine) ApplyTrade(symbol string, tradeType string) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	symbol = strings.ToUpper(strings.TrimSpace(symbol))
+	switch strings.ToUpper(strings.TrimSpace(tradeType)) {
+	case "ENTRY":
+		if symbol != "" {
+			e.openTrades[symbol] = struct{}{}
+		}
+	case "EXIT":
+		delete(e.openTrades, symbol)
 	}
 }
 

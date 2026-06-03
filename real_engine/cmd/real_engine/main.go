@@ -12,6 +12,7 @@ import (
 	"go.uber.org/zap"
 
 	"real_engine/common"
+	"real_engine/internal/brokersync"
 	"real_engine/internal/config"
 	"real_engine/internal/dashboard"
 	"real_engine/internal/engine"
@@ -87,6 +88,15 @@ func run(configPath string) error {
 		return err
 	}
 	defer signalsConsumer.Close()
+
+	var brokerSync *brokersync.Sync
+	if cfg.BrokerSync.Enabled {
+		brokerSync, err = brokersync.Start(ctx, cfg, logger)
+		if err != nil {
+			return err
+		}
+		defer brokerSync.Close()
+	}
 
 	candlesConsumer, err := kafka.NewCandlesConsumer(cfg.Kafka, logger)
 	if err != nil {
@@ -193,27 +203,32 @@ func run(configPath string) error {
 				metrics.ErrorsTotal.Inc()
 				counters.ErrorsTotal++
 			} else if sig != nil {
+				normalized := normalizeStrategySignal(cfg, sig, time.Now().In(loc), loc)
+				if normalized == nil {
+					_ = signalsConsumer.Commit()
+					continue
+				}
 				metrics.SignalsConsumedTotal.Inc()
 				counters.SignalsConsumedTotal++
-				entryPrice, ok := core.GetLatestPriceForSymbol(sig.Symbol)
+				entryPrice, ok := core.GetLatestPriceForSymbol(normalized.Symbol)
 				if !ok {
-					if latest := core.GetLatestCandleForSymbol(sig.Symbol); latest != nil {
+					if latest := core.GetLatestCandleForSymbol(normalized.Symbol); latest != nil {
 						entryPrice = latest.Close
 						ok = entryPrice > 0
 					}
 				}
 				if !ok {
-					if lookedUp, found := ticksConsumer.LookupLatestPrice(sig.Symbol); found {
+					if lookedUp, found := ticksConsumer.LookupLatestPrice(normalized.Symbol); found {
 						entryPrice = lookedUp
 						ok = true
 					}
 				}
-				if trade, err := core.OnSignal(*sig, entryPrice); err != nil {
+				if trade, err := core.OnSignal(*normalized, entryPrice); err != nil {
 					if err.Error() == "invalid entry price" {
-						core.QueueSignal(*sig, time.Now().In(loc))
-						logger.Info("queued signal until first live tick is available", zap.String("symbol", sig.Symbol))
+						core.QueueSignal(*normalized, time.Now().In(loc))
+						logger.Info("queued signal until first live tick is available", zap.String("symbol", normalized.Symbol))
 					} else {
-						logger.Error("OnSignal error", zap.Error(err), zap.String("symbol", sig.Symbol))
+						logger.Error("OnSignal error", zap.Error(err), zap.String("symbol", normalized.Symbol))
 						metrics.ErrorsTotal.Inc()
 						counters.ErrorsTotal++
 					}

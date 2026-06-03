@@ -39,6 +39,13 @@ type StrategyConfig struct {
 	S4TargetPct             float64 `json:"s4_target_pct"`
 	TrailingStopStepPct     float64 `json:"trailing_stop_step_pct"`
 	TrailingFreezeProfitPct float64 `json:"trailing_freeze_profit_pct"`
+	FallbackEnabled         bool    `json:"fallback_enabled"`
+	FallbackEvaluateAt      string  `json:"fallback_evaluate_at"`
+	FallbackMinPositivePct  float64 `json:"fallback_min_positive_move_pct"`
+	FallbackMaxBaselineSec  int     `json:"fallback_max_baseline_delay_sec"`
+	FallbackMaxLastTickSec  int     `json:"fallback_max_last_tick_age_sec"`
+	FallbackMaxPublishSec   int     `json:"fallback_max_publish_delay_sec"`
+	FallbackStrategyName    string  `json:"fallback_strategy_name"`
 }
 
 type ServiceConfig struct {

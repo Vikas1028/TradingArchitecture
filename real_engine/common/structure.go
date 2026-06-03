@@ -59,6 +59,28 @@ type DhanConfig struct {
 	Validity          string `json:"validity"`
 	InstrumentCSVPath string `json:"instrument_csv_path"`
 	RequestTimeoutSec int    `json:"request_timeout_sec"`
+	OrderUpdateURL    string `json:"order_update_url"`
+	PositionsPath     string `json:"positions_path"`
+	PositionsPollSec  int    `json:"positions_poll_interval_sec"`
+}
+
+type EntryWindow struct {
+	Start string `json:"start"`
+	End   string `json:"end"`
+}
+
+type RoutingConfig struct {
+	Enabled                bool          `json:"enabled"`
+	AllowedStrategies      []string      `json:"allowed_strategies"`
+	EntryWindows           []EntryWindow `json:"entry_windows"`
+	MaxSignalAgeSec        int           `json:"max_signal_age_sec"`
+	FixedQuantity          int64         `json:"fixed_quantity"`
+	FixedStopLossPct       float64       `json:"fixed_stop_loss_pct"`
+	FixedTargetPct         float64       `json:"fixed_target_pct"`
+}
+
+type BrokerSyncConfig struct {
+	Enabled bool `json:"enabled"`
 }
 
 type AppConfig struct {
@@ -68,6 +90,8 @@ type AppConfig struct {
 	Trading  TradingConfig  `json:"trading"`
 	Risk     RiskConfig     `json:"risk"`
 	Dhan     DhanConfig     `json:"dhan"`
+	Routing  RoutingConfig  `json:"routing"`
+	BrokerSync BrokerSyncConfig `json:"broker_sync"`
 }
 
 type LoggerConfig struct {

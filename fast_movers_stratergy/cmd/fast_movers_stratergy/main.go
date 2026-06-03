@@ -36,6 +36,11 @@ func main() {
 		log.Fatalf("ticks consumer error: %v", err)
 	}
 	defer consumer.Close()
+	tradesConsumer, err := jetstream.NewTradesConsumer(cfg.Kafka.BootstrapServers, cfg.Kafka.TradesTopic, cfg.Kafka.TradesGroupID)
+	if err != nil {
+		log.Fatalf("trades consumer error: %v", err)
+	}
+	defer tradesConsumer.Close()
 	producer, err := jetstream.NewSignalProducer(cfg.Kafka.BootstrapServers, cfg.Kafka.SignalTopic)
 	if err != nil {
 		log.Fatalf("signal producer error: %v", err)
@@ -75,6 +80,13 @@ func main() {
 				Strategy4Total: engine.Strategy4Total(),
 			})
 		default:
+			tradePollCtx, tradeCancel := context.WithTimeout(ctx, 100*time.Millisecond)
+			tradeEvent, tradeErr := tradesConsumer.Poll(tradePollCtx)
+			tradeCancel()
+			if tradeErr == nil && tradeEvent != nil {
+				engine.ApplyTrade(tradeEvent.Symbol, tradeEvent.TradeType)
+				_ = tradesConsumer.Commit()
+			}
 			pollCtx, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
 			tick, err := consumer.Poll(pollCtx)
 			cancel()

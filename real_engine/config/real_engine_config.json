@@ -6,7 +6,7 @@
     "signals_group_id": "real-engine-signals-v1",
     "candles_group_id": "real-engine-candles-v1",
     "ticks_group_id": "real-engine-ticks-v1",
-    "signals_topic": "signals.real",
+    "signals_topic": "signals.strategy",
     "candles_topic": "candle.raw",
     "ticks_topic": "ticks.raw",
     "trades_topic": "trades.real",
@@ -33,7 +33,7 @@
     "entry_end": "15:15",
     "eod_flat_time": "15:29",
     "mtm_snapshot_interval_sec": 60,
-    "pending_signal_max_age_sec": 180
+    "pending_signal_max_age_sec": 30
   },
   "risk": {
     "capital_per_trade": 10000.0,
@@ -41,7 +41,7 @@
     "max_open_positions": 3,
     "max_daily_loss": 2000.0,
     "per_trade_sl_pct": 0.5,
-    "per_trade_target_pct": 1.0
+    "per_trade_target_pct": 0.0
   },
   "dhan": {
     "client_id": "1110860305",
@@ -52,6 +52,33 @@
     "order_type": "MARKET",
     "validity": "DAY",
     "instrument_csv_path": "./stocks/nifty500.csv",
-    "request_timeout_sec": 10
+    "request_timeout_sec": 10,
+    "order_update_url": "wss://api-order-update.dhan.co",
+    "positions_path": "/v2/positions",
+    "positions_poll_interval_sec": 15
+  },
+  "routing": {
+    "enabled": true,
+    "allowed_strategies": [
+      "openmarketvolatility_s2_30sec_burst",
+      "openmarketvolatility_s2_top_gainer_fallback"
+    ],
+    "entry_windows": [
+      {
+        "start": "09:16:00",
+        "end": "10:00:00"
+      },
+      {
+        "start": "15:00:00",
+        "end": "15:30:00"
+      }
+    ],
+    "max_signal_age_sec": 30,
+    "fixed_quantity": 1,
+    "fixed_stop_loss_pct": 0.30,
+    "fixed_target_pct": 0.0
+  },
+  "broker_sync": {
+    "enabled": true
   }
 }

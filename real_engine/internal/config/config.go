@@ -140,6 +140,39 @@ func applyDefaults(cfg *common.AppConfig) {
 	if cfg.Dhan.RequestTimeoutSec <= 0 {
 		cfg.Dhan.RequestTimeoutSec = common.DefaultRequestTimeoutSec
 	}
+	if strings.TrimSpace(cfg.Dhan.OrderUpdateURL) == "" {
+		cfg.Dhan.OrderUpdateURL = common.DefaultOrderUpdateURL
+	}
+	if strings.TrimSpace(cfg.Dhan.PositionsPath) == "" {
+		cfg.Dhan.PositionsPath = common.DefaultPositionsPath
+	}
+	if cfg.Dhan.PositionsPollSec <= 0 {
+		cfg.Dhan.PositionsPollSec = common.DefaultPositionsPollSec
+	}
+	if len(cfg.Routing.AllowedStrategies) == 0 {
+		cfg.Routing.AllowedStrategies = []string{
+			"openmarketvolatility_s2_30sec_burst",
+			"openmarketvolatility_s2_top_gainer_fallback",
+		}
+	}
+	if cfg.Routing.MaxSignalAgeSec <= 0 {
+		cfg.Routing.MaxSignalAgeSec = 30
+	}
+	if cfg.Routing.FixedQuantity <= 0 {
+		cfg.Routing.FixedQuantity = 1
+	}
+	if cfg.Routing.FixedStopLossPct <= 0 {
+		cfg.Routing.FixedStopLossPct = 0.30
+	}
+	if cfg.Routing.FixedTargetPct < 0 {
+		cfg.Routing.FixedTargetPct = 0
+	}
+	if len(cfg.Routing.EntryWindows) == 0 {
+		cfg.Routing.EntryWindows = []common.EntryWindow{
+			{Start: "09:16:00", End: "10:00:00"},
+			{Start: "15:00:00", End: "15:30:00"},
+		}
+	}
 }
 
 func validate(cfg *common.AppConfig) error {
@@ -189,8 +222,8 @@ func validate(cfg *common.AppConfig) error {
 	if cfg.Risk.PerTradeSLPct <= 0 {
 		missing = append(missing, "risk.per_trade_sl_pct")
 	}
-	if cfg.Risk.PerTradeTargetPct <= 0 {
-		missing = append(missing, "risk.per_trade_target_pct")
+	if cfg.Risk.PerTradeTargetPct < 0 {
+		missing = append(missing, "risk.per_trade_target_pct(>=0)")
 	}
 	if strings.TrimSpace(cfg.Dhan.ClientID) == "" {
 		missing = append(missing, "dhan.client_id")

@@ -36,16 +36,19 @@ type strategy4State struct {
 }
 
 type symbolState struct {
-	OpenPrice        float64
-	LastPrice        float64
-	LastTickTime     time.Time
-	LastSource       string
-	CurrentMinute    minuteState
-	PreviousMinute   minuteState
-	Strategy1        strategy1State
-	Strategy4        strategy4State
-	TradeDate        string
-	LastSignalMinute time.Time
+	OpenPrice          float64
+	LastPrice          float64
+	LastTickTime       time.Time
+	LastSource         string
+	CurrentMinute      minuteState
+	PreviousMinute     minuteState
+	Strategy1          strategy1State
+	Strategy4          strategy4State
+	TradeDate          string
+	LastSignalMinute   time.Time
+	FallbackBasePrice  float64
+	FallbackBaseAt     time.Time
+	LastStrategySignal map[string]time.Time
 }
 
 type Engine struct {
@@ -63,6 +66,8 @@ type Engine struct {
 	s4Count        int
 	s2MinuteCount  map[string]int
 	tradeDate      string
+	s2ThresholdHit bool
+	s2FallbackDone bool
 }
 
 func NewEngine(cfg EngineConfig) (*Engine, error) {
@@ -101,6 +106,9 @@ func (e *Engine) OnTick(tick common.Tick) []common.Signal {
 	if signal, ok := e.evaluateStrategy4(tick, state, now); ok {
 		signals = append(signals, signal)
 	}
+	if signal, ok := e.evaluateS2Fallback(now); ok {
+		signals = append(signals, signal)
+	}
 	return signals
 }
 
@@ -115,6 +123,8 @@ func (e *Engine) ensureTradeDate(now time.Time) {
 	e.s4Count = 0
 	e.s2MinuteCount = make(map[string]int)
 	e.symbols = make(map[string]*symbolState)
+	e.s2ThresholdHit = false
+	e.s2FallbackDone = false
 }
 
 func (e *Engine) stateFor(symbol string) *symbolState {
@@ -122,7 +132,7 @@ func (e *Engine) stateFor(symbol string) *symbolState {
 	if ok {
 		return state
 	}
-	state = &symbolState{}
+	state = &symbolState{LastStrategySignal: make(map[string]time.Time)}
 	e.symbols[symbol] = state
 	return state
 }
@@ -133,6 +143,14 @@ func (e *Engine) acceptSource(state *symbolState, tick common.Tick) {
 	state.LastSource = tick.Source
 	if state.OpenPrice == 0 && tick.DayOpen > 0 {
 		state.OpenPrice = tick.DayOpen
+	}
+	if withinWindow(tick.Time.In(e.loc), e.cfg.Strategy.BurstWindowStart, e.cfg.Strategy.FallbackEvaluateAt, e.loc) {
+		windowStart := parseClock(e.cfg.Strategy.BurstWindowStart, e.loc, tick.Time.In(e.loc))
+		baselineDeadline := windowStart.Add(time.Duration(e.cfg.Strategy.FallbackMaxBaselineSec) * time.Second)
+		if state.FallbackBasePrice == 0 && !tick.Time.In(e.loc).After(baselineDeadline) {
+			state.FallbackBasePrice = tick.LTP
+			state.FallbackBaseAt = tick.Time.In(e.loc)
+		}
 	}
 }
 
@@ -215,21 +233,23 @@ func (e *Engine) evaluateStrategy2(tick common.Tick, state *symbolState, now tim
 	upMove := pctUp(state.OpenPrice, tick.LTP)
 	downMove := pctDown(state.OpenPrice, tick.LTP)
 	if upMove >= e.cfg.Strategy.BurstTriggerPct {
+		e.s2ThresholdHit = true
 		if state.CurrentMinute.BurstStart.IsZero() {
 			state.CurrentMinute.BurstStart = now
 		}
 		if now.Sub(state.CurrentMinute.BurstStart) >= time.Duration(e.cfg.Strategy.BurstConfirmationSec)*time.Second {
 			e.s2MinuteCount[minuteKey]++
-			return e.emit("openmarketvolatility_s2_30sec_burst", tick.Symbol, "BUY", now, fmt.Sprintf("S2 BUY minute=%s open=%.2f moved %.2f%% up within %ds", minuteKey, state.OpenPrice, upMove, e.cfg.Strategy.BurstConfirmationSec), e.cfg.Strategy.DefaultStopLossPct, e.cfg.Strategy.DefaultTargetPct), true
+			return e.emitIfAllowed(state, "openmarketvolatility_s2_30sec_burst", tick.Symbol, "BUY", now, fmt.Sprintf("S2 BUY minute=%s open=%.2f moved %.2f%% up within %ds", minuteKey, state.OpenPrice, upMove, e.cfg.Strategy.BurstConfirmationSec), e.cfg.Strategy.DefaultStopLossPct, e.cfg.Strategy.DefaultTargetPct)
 		}
 	}
 	if downMove >= e.cfg.Strategy.BurstTriggerPct {
+		e.s2ThresholdHit = true
 		if state.CurrentMinute.BurstStart.IsZero() {
 			state.CurrentMinute.BurstStart = now
 		}
 		if now.Sub(state.CurrentMinute.BurstStart) >= time.Duration(e.cfg.Strategy.BurstConfirmationSec)*time.Second {
 			e.s2MinuteCount[minuteKey]++
-			return e.emit("openmarketvolatility_s2_30sec_burst", tick.Symbol, "SELL", now, fmt.Sprintf("S2 SELL minute=%s open=%.2f moved %.2f%% down within %ds", minuteKey, state.OpenPrice, downMove, e.cfg.Strategy.BurstConfirmationSec), e.cfg.Strategy.DefaultStopLossPct, e.cfg.Strategy.DefaultTargetPct), true
+			return e.emitIfAllowed(state, "openmarketvolatility_s2_30sec_burst", tick.Symbol, "SELL", now, fmt.Sprintf("S2 SELL minute=%s open=%.2f moved %.2f%% down within %ds", minuteKey, state.OpenPrice, downMove, e.cfg.Strategy.BurstConfirmationSec), e.cfg.Strategy.DefaultStopLossPct, e.cfg.Strategy.DefaultTargetPct)
 		}
 	}
 	return common.Signal{}, false
@@ -272,12 +292,14 @@ func (e *Engine) emit(strategyName, symbol, side string, now time.Time, reason s
 	switch strategyName {
 	case "openmarketvolatility_s1_open_reclaim":
 		e.strategy1Total++
-	case "openmarketvolatility_s2_30sec_burst":
-		e.strategy2Total++
 	case "openmarketvolatility_s3_two_candle":
 		e.strategy3Total++
 	case "openmarketvolatility_s4_orb_retest":
 		e.strategy4Total++
+	default:
+		if strategyName == "openmarketvolatility_s2_30sec_burst" || strategyName == e.cfg.Strategy.FallbackStrategyName {
+			e.strategy2Total++
+		}
 	}
 	return common.Signal{
 		Strategy:                strategyName,
@@ -290,6 +312,59 @@ func (e *Engine) emit(strategyName, symbol, side string, now time.Time, reason s
 		TrailingStopPct:         e.cfg.Strategy.TrailingStopStepPct,
 		TrailingFreezeProfitPct: e.cfg.Strategy.TrailingFreezeProfitPct,
 	}
+}
+
+func (e *Engine) emitIfAllowed(state *symbolState, strategyName, symbol, side string, now time.Time, reason string, stopLoss, target float64) (common.Signal, bool) {
+	if state == nil {
+		return e.emit(strategyName, symbol, side, now, reason, stopLoss, target), true
+	}
+	minute := now.Truncate(time.Minute)
+	if last, ok := state.LastStrategySignal[strategyName]; ok && last.Equal(minute) {
+		return common.Signal{}, false
+	}
+	state.LastStrategySignal[strategyName] = minute
+	return e.emit(strategyName, symbol, side, now, reason, stopLoss, target), true
+}
+
+func (e *Engine) evaluateS2Fallback(now time.Time) (common.Signal, bool) {
+	if !e.cfg.Strategy.FallbackEnabled || e.s2FallbackDone || e.s2ThresholdHit {
+		return common.Signal{}, false
+	}
+	evaluateAt := parseClock(e.cfg.Strategy.FallbackEvaluateAt, e.loc, now)
+	if now.Before(evaluateAt) {
+		return common.Signal{}, false
+	}
+	if now.Sub(evaluateAt) > time.Duration(e.cfg.Strategy.FallbackMaxPublishSec)*time.Second {
+		e.s2FallbackDone = true
+		return common.Signal{}, false
+	}
+
+	lastTickCutoff := evaluateAt.Add(-time.Duration(e.cfg.Strategy.FallbackMaxLastTickSec) * time.Second)
+	bestMove := -1.0
+	var bestSymbol string
+	var bestState *symbolState
+	for symbol, state := range e.symbols {
+		if state.FallbackBasePrice <= 0 || state.LastPrice <= 0 {
+			continue
+		}
+		if state.LastTickTime.Before(lastTickCutoff) {
+			continue
+		}
+		movePct := pctUp(state.FallbackBasePrice, state.LastPrice)
+		if movePct < e.cfg.Strategy.FallbackMinPositivePct {
+			continue
+		}
+		if movePct > bestMove {
+			bestMove = movePct
+			bestSymbol = symbol
+			bestState = state
+		}
+	}
+	e.s2FallbackDone = true
+	if bestState == nil {
+		return common.Signal{}, false
+	}
+	return e.emitIfAllowed(bestState, e.cfg.Strategy.FallbackStrategyName, bestSymbol, "BUY", now, fmt.Sprintf("S2 fallback BUY base=%.2f last=%.2f move=%.2f%% evaluate_at=%s", bestState.FallbackBasePrice, bestState.LastPrice, bestMove, e.cfg.Strategy.FallbackEvaluateAt), 0.30, 0.0)
 }
 
 func (e *Engine) ActiveSymbols() int {

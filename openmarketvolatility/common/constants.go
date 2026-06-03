@@ -38,6 +38,13 @@ const (
 	DefaultS4TargetPct         = 0.90
 	DefaultTrailingStopStepPct = 0.30
 	DefaultTrailingFreezePct   = 1.00
+	DefaultFallbackEnabled     = true
+	DefaultFallbackEvaluateAt  = "09:16:30"
+	DefaultFallbackMinMovePct  = 0.05
+	DefaultFallbackBaselineSec = 5
+	DefaultFallbackLastTickSec = 5
+	DefaultFallbackPublishSec  = 15
+	DefaultFallbackStrategy    = "openmarketvolatility_s2_top_gainer_fallback"
 	DefaultMetricsPort         = "9113"
 	DefaultDashboardPath       = "/dashboard"
 )

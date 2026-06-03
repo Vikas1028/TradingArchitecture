@@ -38,6 +38,9 @@ const (
 	DefaultOrderValidity     = "DAY"
 	DefaultInstrumentsCSV    = "./stocks/nifty500.csv"
 	DefaultRequestTimeoutSec = 10
+	DefaultOrderUpdateURL    = "wss://api-order-update.dhan.co"
+	DefaultPositionsPath     = "/v2/positions"
+	DefaultPositionsPollSec  = 15
 )
 
 const (

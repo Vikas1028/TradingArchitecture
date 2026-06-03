@@ -60,11 +60,17 @@ func (c *SignalsConsumer) Poll(ctx context.Context) (*engine.StrategySignal, err
 	}
 	c.lastMsg = msg
 	var raw struct {
-		Strategy string `json:"strategy"`
-		Symbol   string `json:"symbol"`
-		Side     string `json:"side"`
-		Time     string `json:"time"`
-		Reason   string `json:"reason"`
+		SignalID                string  `json:"signal_id"`
+		Strategy                string  `json:"strategy"`
+		Symbol                  string  `json:"symbol"`
+		Side                    string  `json:"side"`
+		Time                    string  `json:"time"`
+		Reason                  string  `json:"reason"`
+		Quantity                int64   `json:"quantity"`
+		StopLossPct             float64 `json:"stop_loss_pct"`
+		TargetPct               float64 `json:"target_pct"`
+		TrailingStopPct         float64 `json:"trailing_stop_pct"`
+		TrailingFreezeProfitPct float64 `json:"trailing_freeze_profit_pct"`
 	}
 	if err := json.Unmarshal(msg.Data, &raw); err != nil {
 		c.logger.Warn("failed to unmarshal signal", zap.Error(err))
@@ -78,11 +84,17 @@ func (c *SignalsConsumer) Poll(ctx context.Context) (*engine.StrategySignal, err
 		return nil, nil
 	}
 	sig := engine.StrategySignal{
-		Strategy: raw.Strategy,
-		Symbol:   strings.ToUpper(strings.TrimSpace(raw.Symbol)),
-		Side:     engine.SignalSide(raw.Side),
-		Time:     parsedTime,
-		Reason:   raw.Reason,
+		SignalID:                strings.TrimSpace(raw.SignalID),
+		Strategy:                raw.Strategy,
+		Symbol:                  strings.ToUpper(strings.TrimSpace(raw.Symbol)),
+		Side:                    engine.SignalSide(raw.Side),
+		Time:                    parsedTime,
+		Reason:                  raw.Reason,
+		Quantity:                raw.Quantity,
+		StopLossPct:             raw.StopLossPct,
+		TargetPct:               raw.TargetPct,
+		TrailingStopPct:         raw.TrailingStopPct,
+		TrailingFreezeProfitPct: raw.TrailingFreezeProfitPct,
 	}
 	if !c.startupCutoff.IsZero() && parsedTime.Before(c.startupCutoff) {
 		_ = c.Commit()

@@ -35,7 +35,14 @@
     "s4_stop_loss_pct": 0.30,
     "s4_target_pct": 0.90,
     "trailing_stop_step_pct": 0.3,
-    "trailing_freeze_profit_pct": 1.0
+    "trailing_freeze_profit_pct": 1.0,
+    "fallback_enabled": true,
+    "fallback_evaluate_at": "09:16:30",
+    "fallback_min_positive_move_pct": 0.05,
+    "fallback_max_baseline_delay_sec": 5,
+    "fallback_max_last_tick_age_sec": 5,
+    "fallback_max_publish_delay_sec": 15,
+    "fallback_strategy_name": "openmarketvolatility_s2_top_gainer_fallback"
   },
   "service": {
     "metrics_address": ":9113",
