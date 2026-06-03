@@ -21,6 +21,16 @@
     "signals_subject": "signals.news",
     "alerts_subject": "alerts.news"
   },
+  "collector": {
+    "enabled": true,
+    "interval_seconds": 180,
+    "request_timeout_sec": 10,
+    "lookback_hours": 24,
+    "max_items_per_symbol": 3,
+    "user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0 Safari/537.36",
+    "search_query_suffix": "when:1d",
+    "startup_fetch_enabled": true
+  },
   "symbols": {
     "aliases": {
       "HDFCBANK": ["HDFC Bank", "HDFC Bank Ltd"],

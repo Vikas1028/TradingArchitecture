@@ -17,11 +17,25 @@ type ServiceConfig struct {
 	LaunchdLabel string `json:"launchd_label,omitempty"`
 }
 
+type BrokerCommandConfig struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Section     string `json:"section"`
+	Description string `json:"description"`
+	Command     string `json:"command"`
+}
+
+type BrokerPanelConfig struct {
+	Title    string                `json:"title"`
+	Commands []BrokerCommandConfig `json:"commands"`
+}
+
 type AppConfig struct {
-	BindAddress        string          `json:"bind_address"`
-	PageTitle          string          `json:"page_title"`
-	RefreshIntervalSec int             `json:"refresh_interval_sec"`
-	Services           []ServiceConfig `json:"services"`
+	BindAddress        string            `json:"bind_address"`
+	PageTitle          string            `json:"page_title"`
+	RefreshIntervalSec int               `json:"refresh_interval_sec"`
+	Services           []ServiceConfig   `json:"services"`
+	BrokerPanel        BrokerPanelConfig `json:"broker_panel"`
 }
 
 func Load(path string) (*AppConfig, error) {
@@ -53,6 +67,9 @@ func applyDefaults(cfg *AppConfig) {
 	if cfg.RefreshIntervalSec <= 0 {
 		cfg.RefreshIntervalSec = 2
 	}
+	if strings.TrimSpace(cfg.BrokerPanel.Title) == "" {
+		cfg.BrokerPanel.Title = "NATS and JetStream"
+	}
 }
 
 func validate(cfg *AppConfig) error {
@@ -78,6 +95,26 @@ func validate(cfg *AppConfig) error {
 			return fmt.Errorf("duplicate service id: %s", service.ID)
 		}
 		seen[service.ID] = true
+	}
+
+	brokerSeen := make(map[string]bool)
+	for _, command := range cfg.BrokerPanel.Commands {
+		if strings.TrimSpace(command.ID) == "" {
+			return fmt.Errorf("broker command id is required")
+		}
+		if strings.TrimSpace(command.Name) == "" {
+			return fmt.Errorf("broker command name is required for %s", command.ID)
+		}
+		if strings.TrimSpace(command.Section) == "" {
+			return fmt.Errorf("broker command section is required for %s", command.ID)
+		}
+		if strings.TrimSpace(command.Command) == "" {
+			return fmt.Errorf("broker command shell is required for %s", command.ID)
+		}
+		if brokerSeen[command.ID] {
+			return fmt.Errorf("duplicate broker command id: %s", command.ID)
+		}
+		brokerSeen[command.ID] = true
 	}
 
 	return nil

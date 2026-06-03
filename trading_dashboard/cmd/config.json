@@ -2,6 +2,67 @@
   "bind_address": ":9200",
   "page_title": "Trading Dashboard",
   "refresh_interval_sec": 1,
+  "broker_panel": {
+    "title": "NATS and JetStream",
+    "commands": [
+      {
+        "id": "core_subjects",
+        "name": "Subjects and Subscribers",
+        "section": "nats_core",
+        "description": "Check which subjects exist in core NATS and who is subscribed to them.",
+        "command": "/usr/bin/curl -sf 'http://127.0.0.1:8222/subsz?subs=1' | /usr/bin/jq"
+      },
+      {
+        "id": "core_connections",
+        "name": "Connection Health",
+        "section": "nats_core",
+        "description": "Inspect live connections, subscription counts, pending bytes, and per-connection traffic.",
+        "command": "/usr/bin/curl -sf 'http://127.0.0.1:8222/connz?subs=1' | /usr/bin/jq '{server_id,total_connections,num_connections,slow_consumers,total_subscriptions:(.connections // [] | map(.subscriptions | length) | add),connections:((.connections // []) | map({cid,name,ip,port,subscriptions:(.subscriptions | length),pending_bytes,in_msgs,out_msgs}))}'"
+      },
+      {
+        "id": "core_flow",
+        "name": "Message Flow",
+        "section": "nats_core",
+        "description": "See total message and byte flow through the NATS server.",
+        "command": "/usr/bin/curl -sf 'http://127.0.0.1:8222/varz' | /usr/bin/jq '{server_id,start,uptime,in_msgs,out_msgs,in_bytes,out_bytes,subscriptions,slow_consumers,mem,cpu,connections,total_connections}'"
+      },
+      {
+        "id": "core_slow",
+        "name": "Slow Consumers",
+        "section": "nats_core",
+        "description": "Find whether any NATS core clients are currently marked as slow consumers.",
+        "command": "/usr/bin/curl -sf 'http://127.0.0.1:8222/connz?subs=1' | /usr/bin/jq '{slow_consumers,connections:((.connections // []) | map(select((.slow_consumer // false) == true) | {cid,name,ip,pending_bytes,in_msgs,out_msgs,subscriptions}))}'"
+      },
+      {
+        "id": "js_streams",
+        "name": "Stream Summary",
+        "section": "jetstream",
+        "description": "Inspect JetStream streams, subjects, message counts, storage, and consumer totals.",
+        "command": "/opt/homebrew/bin/nats --server nats://127.0.0.1:4222 stream report"
+      },
+      {
+        "id": "js_consumers",
+        "name": "Consumer Pending and Lag",
+        "section": "jetstream",
+        "description": "Show per-stream consumer pending messages and lag across the active trading streams.",
+        "command": "for s in TICKS_RAW CANDLE_RAW INDICES_RAW SIGNALS_STRATEGY TRADES_PAPER PNL_PAPER; do echo \"=== ${s} ===\"; /opt/homebrew/bin/nats --server nats://127.0.0.1:4222 consumer report \"$s\" || true; echo; done"
+      },
+      {
+        "id": "js_ack_state",
+        "name": "Ack State",
+        "section": "jetstream",
+        "description": "Show delivered sequence, ack floor, and pending ack state for each JetStream consumer.",
+        "command": "for pair in 'TICKS_RAW marketdata-candle-builder-v2' 'CANDLE_RAW first-candle-strategy' 'CANDLE_RAW vwap-strategy-stock' 'CANDLE_RAW ldrb-strategy-stock' 'INDICES_RAW ldrb-strategy-index' 'SIGNALS_STRATEGY paper-engine-signals-v2' 'TRADES_PAPER paper-engine-recovery'; do set -- $pair; echo \"=== $1 / $2 ===\"; /opt/homebrew/bin/nats --server nats://127.0.0.1:4222 consumer info \"$1\" \"$2\" || true; echo; done"
+      },
+      {
+        "id": "js_redelivery",
+        "name": "Redeliveries",
+        "section": "jetstream",
+        "description": "Check which consumers are redelivering messages and whether ack backlogs are building.",
+        "command": "for pair in 'TICKS_RAW marketdata-candle-builder-v2' 'CANDLE_RAW first-candle-strategy' 'CANDLE_RAW vwap-strategy-stock' 'CANDLE_RAW ldrb-strategy-stock' 'INDICES_RAW ldrb-strategy-index' 'SIGNALS_STRATEGY paper-engine-signals-v2'; do set -- $pair; echo \"=== $1 / $2 ===\"; /opt/homebrew/bin/nats --server nats://127.0.0.1:4222 consumer info \"$1\" \"$2\" | /usr/bin/awk '/Redelivered Messages|Outstanding Acks|Unprocessed Messages|Acknowledgment Floor|Last Delivered Message/ {print}'; echo; done"
+      }
+    ]
+  },
   "services": [
     {
       "id": "go_feed",
@@ -13,12 +74,39 @@
       "launchd_label": "com.go_feed.service"
     },
     {
+      "id": "go_option_feed",
+      "name": "Go Option Feed",
+      "source_type": "go_feed_dashboard",
+      "dashboard_url": "http://localhost:9114/dashboard",
+      "start_script": "/Users/vikasbhandekar/live_services/go_option_feed/scripts/start_mac.sh",
+      "stop_script": "/Users/vikasbhandekar/live_services/go_option_feed/scripts/stop_mac.sh",
+      "launchd_label": "com.go_option_feed.service"
+    },
+    {
+      "id": "chart_view",
+      "name": "Chart View",
+      "source_type": "go_feed_dashboard",
+      "dashboard_url": "http://localhost:9117/dashboard",
+      "start_script": "/Users/vikasbhandekar/live_services/chart_view/scripts/start_mac.sh",
+      "stop_script": "/Users/vikasbhandekar/live_services/chart_view/scripts/stop_mac.sh",
+      "launchd_label": "com.chart_view.service"
+    },
+    {
+      "id": "filters",
+      "name": "Filters",
+      "source_type": "go_feed_dashboard",
+      "dashboard_url": "http://localhost:9118/dashboard",
+      "start_script": "/Users/vikasbhandekar/live_services/filters/scripts/start_mac.sh",
+      "stop_script": "/Users/vikasbhandekar/live_services/filters/scripts/stop_mac.sh",
+      "launchd_label": "com.filters.service"
+    },
+    {
       "id": "first_candle_strategy",
       "name": "First Candle Strategy",
       "source_type": "prometheus_metrics",
       "dashboard_url": "http://localhost:9103/metrics",
-      "start_script": "/Users/vikasbhandekar/live_services/first_candle_strategy/scripts/start_mac.sh",
-      "stop_script": "/Users/vikasbhandekar/live_services/first_candle_strategy/scripts/stop_mac.sh",
+      "start_script": "/Users/vikasbhandekar/live_services/first_candle_strategy/internal/scripts/start_mac.sh",
+      "stop_script": "/Users/vikasbhandekar/live_services/first_candle_strategy/internal/scripts/stop_mac.sh",
       "launchd_label": "com.first_candle_strategy.service"
     },
     {
@@ -26,8 +114,8 @@
       "name": "Marketdata",
       "source_type": "prometheus_metrics",
       "dashboard_url": "http://localhost:9104/metrics",
-      "start_script": "/Users/vikasbhandekar/live_services/marketdata/scripts/start_mac.sh",
-      "stop_script": "/Users/vikasbhandekar/live_services/marketdata/scripts/stop_mac.sh",
+      "start_script": "/Users/vikasbhandekar/live_services/marketdata/internal/scripts/start_mac.sh",
+      "stop_script": "/Users/vikasbhandekar/live_services/marketdata/internal/scripts/stop_mac.sh",
       "launchd_label": "com.marketdata.service"
     },
     {
@@ -35,26 +123,35 @@
       "name": "Paper Engine",
       "source_type": "go_feed_dashboard",
       "dashboard_url": "http://localhost:9102/dashboard",
-      "start_script": "/Users/vikasbhandekar/live_services/paper_engine/scripts/start_mac.sh",
-      "stop_script": "/Users/vikasbhandekar/live_services/paper_engine/scripts/stop_mac.sh",
+      "start_script": "/Users/vikasbhandekar/live_services/paper_engine/internal/scripts/start_mac.sh",
+      "stop_script": "/Users/vikasbhandekar/live_services/paper_engine/internal/scripts/stop_mac.sh",
       "launchd_label": "com.paper_engine.service"
     },
     {
-      "id": "python_feed_triplex",
-      "name": "Python Feed Triplex",
+      "id": "real_engine",
+      "name": "Real Engine",
+      "source_type": "go_feed_dashboard",
+      "dashboard_url": "http://localhost:9120/dashboard",
+      "start_script": "/Users/vikasbhandekar/live_services/real_engine/internal/scripts/start_mac.sh",
+      "stop_script": "/Users/vikasbhandekar/live_services/real_engine/internal/scripts/stop_mac.sh",
+      "launchd_label": "com.real_engine.service"
+    },
+    {
+      "id": "python_feed",
+      "name": "Python Feed",
       "source_type": "prometheus_metrics",
       "dashboard_url": "http://localhost:9000/metrics",
-      "start_script": "/Users/vikasbhandekar/live_services/python_feed_triplex/internal/scripts/start_mac.sh",
-      "stop_script": "/Users/vikasbhandekar/live_services/python_feed_triplex/internal/scripts/stop_mac.sh",
-      "launchd_label": "com.python_feed_triplex.service"
+      "start_script": "/Users/vikasbhandekar/live_services/python_feed/internal/scripts/start_mac.sh",
+      "stop_script": "/Users/vikasbhandekar/live_services/python_feed/internal/scripts/stop_mac.sh",
+      "launchd_label": "com.python_feed.service"
     },
     {
       "id": "vwap_strategy",
       "name": "VWAP Strategy",
       "source_type": "prometheus_metrics",
       "dashboard_url": "http://localhost:9101/metrics",
-      "start_script": "/Users/vikasbhandekar/live_services/vwap_strategy/scripts/start_mac.sh",
-      "stop_script": "/Users/vikasbhandekar/live_services/vwap_strategy/scripts/stop_mac.sh",
+      "start_script": "/Users/vikasbhandekar/live_services/vwap_strategy/internal/scripts/start_mac.sh",
+      "stop_script": "/Users/vikasbhandekar/live_services/vwap_strategy/internal/scripts/stop_mac.sh",
       "launchd_label": "com.vwap_strategy.service"
     },
     {
@@ -62,8 +159,8 @@
       "name": "LDRB Strategy",
       "source_type": "prometheus_metrics",
       "dashboard_url": "http://localhost:9106/metrics",
-      "start_script": "/Users/vikasbhandekar/live_services/ldrb_strategy/scripts/start_mac.sh",
-      "stop_script": "/Users/vikasbhandekar/live_services/ldrb_strategy/scripts/stop_mac.sh",
+      "start_script": "/Users/vikasbhandekar/live_services/ldrb_strategy/internal/scripts/start_mac.sh",
+      "stop_script": "/Users/vikasbhandekar/live_services/ldrb_strategy/internal/scripts/stop_mac.sh",
       "launchd_label": "com.ldrb_strategy.service"
     },
     {
@@ -101,6 +198,42 @@
       "start_script": "/Users/vikasbhandekar/live_services/market_caffeinate/scripts/start_mac.sh",
       "stop_script": "/Users/vikasbhandekar/live_services/market_caffeinate/scripts/stop_mac.sh",
       "launchd_label": "com.market_caffeinate.service"
+    },
+    {
+      "id": "news_strategy",
+      "name": "News Strategy",
+      "source_type": "news_strategy_dashboard",
+      "dashboard_url": "http://localhost:9112/dashboard",
+      "start_script": "/Users/vikasbhandekar/live_services/news_stratergy/scripts/start_mac.sh",
+      "stop_script": "/Users/vikasbhandekar/live_services/news_stratergy/scripts/stop_mac.sh",
+      "launchd_label": "com.news_strategy.service"
+    },
+    {
+      "id": "openmarketvolatility",
+      "name": "Open Market Volatility",
+      "source_type": "prometheus_metrics",
+      "dashboard_url": "http://localhost:9113/metrics",
+      "start_script": "/Users/vikasbhandekar/live_services/openmarketvolatility/scripts/start_mac.sh",
+      "stop_script": "/Users/vikasbhandekar/live_services/openmarketvolatility/scripts/stop_mac.sh",
+      "launchd_label": "com.openmarketvolatility.service"
+    },
+    {
+      "id": "fast_movers_stratergy",
+      "name": "Fast Movers Strategy",
+      "source_type": "prometheus_metrics",
+      "dashboard_url": "http://localhost:9116/metrics",
+      "start_script": "/Users/vikasbhandekar/live_services/fast_movers_stratergy/scripts/start_mac.sh",
+      "stop_script": "/Users/vikasbhandekar/live_services/fast_movers_stratergy/scripts/stop_mac.sh",
+      "launchd_label": "com.fast_movers_stratergy.service"
+    },
+    {
+      "id": "trend_recognition",
+      "name": "Trend Recognition",
+      "source_type": "prometheus_metrics",
+      "dashboard_url": "http://localhost:9121/metrics",
+      "start_script": "/Users/vikasbhandekar/live_services/trend_recognition/scripts/start_mac.sh",
+      "stop_script": "/Users/vikasbhandekar/live_services/trend_recognition/scripts/stop_mac.sh",
+      "launchd_label": "com.trend_recognition.service"
     }
   ]
 }

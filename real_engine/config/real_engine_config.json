@@ -1,0 +1,57 @@
+{
+  "env": "prod",
+  "kafka": {
+    "bootstrap_servers": "nats://127.0.0.1:4222",
+    "group_id": "real-engine-v1",
+    "signals_group_id": "real-engine-signals-v1",
+    "candles_group_id": "real-engine-candles-v1",
+    "ticks_group_id": "real-engine-ticks-v1",
+    "signals_topic": "signals.real",
+    "candles_topic": "candle.raw",
+    "ticks_topic": "ticks.raw",
+    "trades_topic": "trades.real",
+    "pnl_topic": "pnl.real",
+    "commit_interval_ms": 1000,
+    "startup_replay_grace_sec": 300,
+    "price_scale_divisor": 1.0
+  },
+  "postgres": {
+    "enabled": true,
+    "host": "localhost",
+    "port": 5432,
+    "user": "vikasbhandekar",
+    "password": "",
+    "db_name": "Algo_trading",
+    "sslmode": "disable",
+    "table_name": "real_engine_trades",
+    "max_conns": 8,
+    "min_conns": 1
+  },
+  "trading": {
+    "timezone": "Asia/Kolkata",
+    "entry_start": "09:15",
+    "entry_end": "15:15",
+    "eod_flat_time": "15:29",
+    "mtm_snapshot_interval_sec": 60,
+    "pending_signal_max_age_sec": 180
+  },
+  "risk": {
+    "capital_per_trade": 10000.0,
+    "max_trades_per_day": 10,
+    "max_open_positions": 3,
+    "max_daily_loss": 2000.0,
+    "per_trade_sl_pct": 0.5,
+    "per_trade_target_pct": 1.0
+  },
+  "dhan": {
+    "client_id": "1110860305",
+    "access_token": "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzUxMiJ9.eyJpc3MiOiJkaGFuIiwicGFydG5lcklkIjoiIiwiZXhwIjoxNzgwNDUxOTE3LCJpYXQiOjE3ODAzNjU1MTcsInRva2VuQ29uc3VtZXJUeXBlIjoiU0VMRiIsIndlYmhvb2tVcmwiOiIiLCJkaGFuQ2xpZW50SWQiOiIxMTEwODYwMzA1In0.gl_YFNyqUxvh1d48jb9n4G2b8vP15h8QDcZuXXqowUydk5yHlEa3gaY4EfssiiXtxELIRkFLm7TSAOiHCRPr4Q",
+    "base_url": "https://api.dhan.co",
+    "exchange_segment": "NSE_EQ",
+    "product_type": "INTRADAY",
+    "order_type": "MARKET",
+    "validity": "DAY",
+    "instrument_csv_path": "./stocks/nifty500.csv",
+    "request_timeout_sec": 10
+  }
+}

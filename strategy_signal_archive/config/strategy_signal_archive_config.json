@@ -1,0 +1,15 @@
+{
+  "env": "prod",
+  "nats": {
+    "url": "nats://127.0.0.1:4222",
+    "signal_subject": "signals.strategy"
+  },
+  "postgres": {
+    "host": "localhost",
+    "port": 5432,
+    "user": "vikasbhandekar",
+    "password": "",
+    "db_name": "Algo_trading",
+    "sslmode": "disable"
+  }
+}

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+
 	"go_feed/common"
 	appConfig "go_feed/config"
 	appKafka "go_feed/kafka"
@@ -16,7 +17,6 @@ var AppRuntime = common.RuntimeChannels{
 	ReadLoopDone:   make(chan struct{}),
 }
 
-// RunApp performs application startup tasks and returns an error if initialization fails.
 func RunApp(ctx context.Context) error {
 	if err := appLogger.InitializeLogger(); err != nil {
 		return err
@@ -29,8 +29,6 @@ func RunApp(ctx context.Context) error {
 	}
 	appLogger.Infof("config initialization completed")
 
-	// Temporary validation-only startup check for Dhan account/feed entitlements.
-	// Remove this block once websocket/data-plan troubleshooting is complete.
 	dataPlanActive := true
 	dataPlanActive, err := appWebsocket.ValidateProfileAccess()
 	if err != nil {
@@ -43,7 +41,7 @@ func RunApp(ctx context.Context) error {
 	if err := appKafka.Connection(ctx); err != nil {
 		return err
 	}
-	appLogger.Infof("kafka connection initialization completed")
+	appLogger.Infof("jetstream connection initialization completed")
 
 	if err := appPostgres.Connection(ctx); err != nil {
 		return err
@@ -59,7 +57,7 @@ func RunApp(ctx context.Context) error {
 	if err := appWebsocket.ClientLogin(); err != nil {
 		return err
 	}
-	appLogger.Infof("websocket login initialization completed")
+	appLogger.Infof("websocket client login completed")
 
 	if err := appWebsocket.Connection(); err != nil {
 		return err
@@ -69,7 +67,7 @@ func RunApp(ctx context.Context) error {
 	if err := appWebsocket.Subscribe(); err != nil {
 		return err
 	}
-	appLogger.Infof("subscription initialization completed")
+	appLogger.Infof("websocket subscription initialization completed")
 
 	appLogger.Infof("starting websocket read loop")
 	go func() {

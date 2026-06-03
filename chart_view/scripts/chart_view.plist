@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.chart_view.service</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/zsh</string>
+        <string>-lc</string>
+        <string>exec /Users/vikasbhandekar/live_services/chart_view/cmd/chart_view/chart_view --config /Users/vikasbhandekar/live_services/chart_view/config/chart_view_config.json</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/vikasbhandekar/live_services/chart_view</string>
+
+    <key>StandardOutPath</key>
+    <string>/Users/vikasbhandekar/live_services/chart_view/logs/launchd.stdout.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/vikasbhandekar/live_services/chart_view/logs/launchd.stderr.log</string>
+
+    <key>RunAtLoad</key>
+    <false/>
+    <key>KeepAlive</key>
+    <false/>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    </dict>
+</dict>
+</plist>

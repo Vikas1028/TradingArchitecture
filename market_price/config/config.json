@@ -9,7 +9,7 @@
         "kafka_topic": "ticks.raw"
       },
       {
-        "name": "python_feed_triplex",
+        "name": "python_feed",
         "kafka_topic": "ticks.raw"
       },
       {

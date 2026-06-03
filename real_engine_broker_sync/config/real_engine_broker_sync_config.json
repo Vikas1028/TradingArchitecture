@@ -1,0 +1,26 @@
+{
+  "env": "prod",
+  "nats": {
+    "url": "nats://127.0.0.1:4222",
+    "orders_subject": "orders.real",
+    "fills_subject": "fills.real",
+    "positions_subject": "positions.real",
+    "broker_pnl_subject": "broker_pnl.real"
+  },
+  "postgres": {
+    "enabled": true,
+    "host": "localhost",
+    "port": 5432,
+    "user": "vikasbhandekar",
+    "password": "",
+    "db_name": "Algo_trading",
+    "sslmode": "disable"
+  },
+  "dhan": {
+    "real_engine_config_path": "/Users/vikasbhandekar/live_services/real_engine/config/real_engine_config.json",
+    "order_update_url": "wss://api-order-update.dhan.co",
+    "positions_path": "/v2/positions",
+    "positions_poll_interval_sec": 15,
+    "request_timeout_sec": 10
+  }
+}

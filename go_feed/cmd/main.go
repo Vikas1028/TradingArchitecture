@@ -21,11 +21,6 @@ import (
 	appWebsocket "go_feed/websocket"
 )
 
-var (
-	version = common.AppVersion
-)
-
-// main bootstraps metrics, starts the application, and handles panic recovery.
 func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -80,8 +75,8 @@ func main() {
 		<-signalChannel
 		appLogger.Warnf("shutdown signal received, closing application resources")
 		cancel()
-		_ = appWebsocket.Close()
 		<-AppRuntime.ReadLoopDone
+		_ = appWebsocket.Close()
 
 		drainTimeout := time.Duration(common.DefaultShutdownDrainSec) * time.Second
 		if appConfig.GlobalConfig != nil && appConfig.GlobalConfig.Pipeline.ShutdownDrainTimeoutSec > 0 {

@@ -20,6 +20,7 @@ const (
 	DefaultSessionStart     = "09:15"
 	DefaultOpeningSlot      = 1
 	DefaultMoveThresholdPct = 0.5
+	DefaultMaxTradesPerDay  = 8
 	DefaultLogLevel         = "INFO"
 	DefaultLogFormat        = "json"
 	DefaultMetricsPort      = "9103"

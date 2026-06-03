@@ -1,0 +1,85 @@
+{
+  "env": "prod",
+  "kafka": {
+    "bootstrap_servers": "nats://127.0.0.1:4222",
+    "group_id": "trend-recognition-v1",
+    "ticks_topic": "ticks.raw.GO_FEED.>",
+    "signal_topic": "signals.strategy",
+    "trades_topic": "trades.paper",
+    "startup_replay_grace_sec": 5
+  },
+  "strategy": {
+    "timezone": "Asia/Kolkata",
+    "market_open_time": "09:15:00",
+    "market_close_time": "15:30:00",
+    "morning_window_start": "09:20:00",
+    "morning_window_end": "10:45:00",
+    "closing_window_start": "14:45:00",
+    "closing_window_end": "15:20:00",
+    "max_open_trades_per_lane": 3,
+    "min_score_to_trade": 6.0,
+    "min_move_from_open_pct": 0.5,
+    "min_rvol": 1.2,
+    "breakout_buffer_pct": 0.05,
+    "near_extreme_pct": 0.2,
+    "max_extension_from_vwap_pct": 1.8,
+    "pullback_shallow_pct": 0.6,
+    "symbol_cooldown_sec": 120,
+    "pending_entry_timeout_sec": 120,
+    "pullback_move_pct": 0.4,
+    "pullback_opposite_pct": 0.2,
+    "pullback_reclaim_tolerance_pct": 0.05,
+    "pullback_second_start": 10,
+    "pullback_second_end": 40,
+    "pullback_max_signals_per_lane": 3,
+    "pullback_stop_loss_pct": 0.5,
+    "pullback_target_pct": 1.0,
+    "pullback_window_start": "09:15:00",
+    "pullback_window_end": "15:20:00"
+  },
+  "risk": {
+    "capital_multiplier": 1.0,
+    "strong_score_threshold": 8.0,
+    "medium_score_threshold": 6.8,
+    "strong_stop_loss_pct": 0.35,
+    "medium_stop_loss_pct": 0.45,
+    "weak_stop_loss_pct": 0.55,
+    "strong_target_pct": 1.4,
+    "medium_target_pct": 1.0,
+    "weak_target_pct": 0.8
+  },
+  "service": {
+    "metrics_address": ":9121",
+    "dashboard_path": "/dashboard"
+  },
+  "logging": {
+    "file_path": "logs/trend_recognition.log",
+    "level": "info"
+  },
+  "lanes": [
+    {
+      "id": "nifty50",
+      "strategy_name": "trend_recognition_v1_nifty50",
+      "pullback_strategy_name": "trend_recognition_pull_back_nifty50",
+      "symbols_csv": "go_feed/stocks/nifty50.csv"
+    },
+    {
+      "id": "nifty100",
+      "strategy_name": "trend_recognition_v1_nifty100",
+      "pullback_strategy_name": "trend_recognition_pull_back_nifty100",
+      "symbols_csv": "go_feed/stocks/nifty100.csv"
+    },
+    {
+      "id": "nifty200",
+      "strategy_name": "trend_recognition_v1_nifty200",
+      "pullback_strategy_name": "trend_recognition_pull_back_nifty200",
+      "symbols_csv": "go_feed/stocks/nifty200.csv"
+    },
+    {
+      "id": "nifty500",
+      "strategy_name": "trend_recognition_v1_nifty500",
+      "pullback_strategy_name": "trend_recognition_pull_back_nifty500",
+      "symbols_csv": "go_feed/stocks/nifty500.csv"
+    }
+  ]
+}

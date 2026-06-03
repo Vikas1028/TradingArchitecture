@@ -1,0 +1,10 @@
+{
+  "bind_address": ":9117",
+  "service_name": "chart_view",
+  "request_timeout_sec": 8,
+  "engines": {
+    "paper_engine": "http://127.0.0.1:9102",
+    "real_engine": "http://127.0.0.1:9120"
+  },
+  "option_feed_base_url": "http://127.0.0.1:9114"
+}

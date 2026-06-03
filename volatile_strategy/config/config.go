@@ -150,6 +150,24 @@ func assignStrategyValue(cfg *common.StrategyConfig, key, value string) error {
 			return err
 		}
 		cfg.TopCount = v
+	case "max_trades_per_day":
+		v, err := strconv.Atoi(value)
+		if err != nil {
+			return err
+		}
+		cfg.MaxTradesPerDay = v
+	case "max_trades_per_symbol_per_day":
+		v, err := strconv.Atoi(value)
+		if err != nil {
+			return err
+		}
+		cfg.MaxTradesPerSymbolPerDay = v
+	case "symbol_cooldown_minutes":
+		v, err := strconv.Atoi(value)
+		if err != nil {
+			return err
+		}
+		cfg.SymbolCooldownMinutes = v
 	default:
 		return fmt.Errorf("unknown strategy key: %s", key)
 	}
@@ -220,6 +238,15 @@ func applyDefaults(cfg *common.AppConfig) {
 	}
 	if cfg.Strategy.TopCount <= 0 {
 		cfg.Strategy.TopCount = common.DefaultTopCount
+	}
+	if cfg.Strategy.MaxTradesPerDay <= 0 {
+		cfg.Strategy.MaxTradesPerDay = common.DefaultMaxTradesPerDay
+	}
+	if cfg.Strategy.MaxTradesPerSymbolPerDay <= 0 {
+		cfg.Strategy.MaxTradesPerSymbolPerDay = common.DefaultMaxTradesPerSymbolDay
+	}
+	if cfg.Strategy.SymbolCooldownMinutes <= 0 {
+		cfg.Strategy.SymbolCooldownMinutes = common.DefaultSymbolCooldownMinutes
 	}
 	if strings.TrimSpace(cfg.Service.MetricsAddress) == "" {
 		cfg.Service.MetricsAddress = common.DefaultMetricsAddress

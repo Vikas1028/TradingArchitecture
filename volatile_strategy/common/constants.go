@@ -26,6 +26,9 @@ const (
 	DefaultConfirmMinutes        = 3
 	DefaultRetracePct            = 0.20
 	DefaultTopCount              = 3
+	DefaultMaxTradesPerDay       = 10
+	DefaultMaxTradesPerSymbolDay = 1
+	DefaultSymbolCooldownMinutes = 10
 	DefaultStartupReplayGraceSec = 120
 	DefaultDirPermission         = 0o755
 	DefaultFilePermission        = 0o644

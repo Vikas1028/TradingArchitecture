@@ -4,6 +4,7 @@
 set -euo pipefail
 
 PLIST_TARGET="${HOME}/Library/LaunchAgents/com.paper_engine.service.plist"
+LOCK_DIR="/tmp/paper_engine_start.lock"
 
 if [[ -f "${PLIST_TARGET}" ]]; then
     launchctl unload "${PLIST_TARGET}" || true
@@ -11,3 +12,5 @@ if [[ -f "${PLIST_TARGET}" ]]; then
 else
     echo "No plist found at ${PLIST_TARGET}; nothing to stop."
 fi
+
+rmdir "${LOCK_DIR}" >/dev/null 2>&1 || true

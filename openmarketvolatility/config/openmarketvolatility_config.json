@@ -1,0 +1,44 @@
+{
+  "env": "prod",
+  "kafka": {
+    "bootstrap_servers": "nats://127.0.0.1:4222",
+    "group_id": "openmarketvolatility",
+    "ticks_topic": "ticks.raw",
+    "signal_topic": "signals.strategy",
+    "commit_interval_ms": 1000,
+    "startup_replay_grace_sec": 120
+  },
+  "strategy": {
+    "timezone": "Asia/Kolkata",
+    "open_window_start": "09:15:05",
+    "open_window_end": "09:15:45",
+    "retrace_threshold_pct": 0.2,
+    "return_tolerance_pct": 0.05,
+    "reversal_trigger_pct": 0.5,
+    "burst_window_start": "09:16:00",
+    "burst_window_end": "09:30:00",
+    "burst_trigger_pct": 1.0,
+    "burst_confirmation_sec": 30,
+    "two_candle_min_move_pct": 0.5,
+    "default_stop_loss_pct": 0.5,
+    "default_target_pct": 1.0,
+    "source_priority_stale_sec": 2,
+    "s1_max_trades_per_day": 3,
+    "s2_max_trades_per_minute": 2,
+    "s3_max_trades_per_day": 5,
+    "s4_max_trades_per_day": 4,
+    "s4_window_start": "09:20:00",
+    "s4_window_end": "11:00:00",
+    "s4_breakout_pct": 0.35,
+    "s4_retest_pct": 0.10,
+    "s4_confirm_pct": 0.08,
+    "s4_stop_loss_pct": 0.30,
+    "s4_target_pct": 0.90,
+    "trailing_stop_step_pct": 0.3,
+    "trailing_freeze_profit_pct": 1.0
+  },
+  "service": {
+    "metrics_address": ":9113",
+    "dashboard_path": "/dashboard"
+  }
+}

@@ -76,6 +76,24 @@ func Load(path string) (*common.AppConfig, error) {
 	if cfg.Broker.AlertsSubject == "" {
 		cfg.Broker.AlertsSubject = common.DefaultAlertsSubject
 	}
+	if cfg.Collector.IntervalSeconds <= 0 {
+		cfg.Collector.IntervalSeconds = common.DefaultCollectorIntervalSeconds
+	}
+	if cfg.Collector.RequestTimeoutSec <= 0 {
+		cfg.Collector.RequestTimeoutSec = common.DefaultCollectorTimeoutSeconds
+	}
+	if cfg.Collector.LookbackHours <= 0 {
+		cfg.Collector.LookbackHours = common.DefaultCollectorLookbackHours
+	}
+	if cfg.Collector.MaxItemsPerSymbol <= 0 {
+		cfg.Collector.MaxItemsPerSymbol = common.DefaultCollectorMaxItems
+	}
+	if cfg.Collector.UserAgent == "" {
+		cfg.Collector.UserAgent = common.DefaultCollectorUserAgent
+	}
+	if cfg.Collector.SearchQuerySuffix == "" {
+		cfg.Collector.SearchQuerySuffix = common.DefaultCollectorQuerySuffix
+	}
 	if cfg.Rules.WatchThreshold <= 0 {
 		cfg.Rules.WatchThreshold = common.DefaultWatchThreshold
 	}

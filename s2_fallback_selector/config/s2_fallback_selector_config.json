@@ -1,0 +1,21 @@
+{
+  "env": "prod",
+  "nats": {
+    "url": "nats://127.0.0.1:4222",
+    "input_subject": "ticks.raw.>",
+    "output_subject": "signals.strategy"
+  },
+  "strategy": {
+    "timezone": "Asia/Kolkata",
+    "window_start": "09:16:00",
+    "evaluate_at": "09:16:30",
+    "threshold_pct": 1.0,
+    "min_positive_move_pct": 0.05,
+    "max_baseline_delay_sec": 5,
+    "max_last_tick_age_sec": 5,
+    "max_publish_delay_sec": 15,
+    "strategy_name": "openmarketvolatility_s2_top_gainer_fallback",
+    "strategy_version": "v1",
+    "signal_reason": "S2_FALLBACK_TOP_GAINER_30SEC"
+  }
+}

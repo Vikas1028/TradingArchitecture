@@ -1,0 +1,4 @@
+{
+  "log_level": "info",
+  "log_file": "logs/trend_recognition.log"
+}

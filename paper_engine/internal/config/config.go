@@ -44,6 +44,24 @@ func applyDefaults(cfg *common.AppConfig) {
 	if strings.TrimSpace(cfg.Env) == "" {
 		cfg.Env = common.DefaultEnv
 	}
+	if strings.TrimSpace(cfg.Postgres.Host) == "" {
+		cfg.Postgres.Host = common.DefaultPGHost
+	}
+	if cfg.Postgres.Port <= 0 {
+		cfg.Postgres.Port = common.DefaultPGPort
+	}
+	if strings.TrimSpace(cfg.Postgres.SSLMode) == "" {
+		cfg.Postgres.SSLMode = common.DefaultPGSSLMode
+	}
+	if strings.TrimSpace(cfg.Postgres.TableName) == "" {
+		cfg.Postgres.TableName = common.DefaultPGTableName
+	}
+	if cfg.Postgres.MaxConns <= 0 {
+		cfg.Postgres.MaxConns = common.DefaultPGMaxConns
+	}
+	if cfg.Postgres.MinConns <= 0 {
+		cfg.Postgres.MinConns = common.DefaultPGMinConns
+	}
 	if strings.TrimSpace(cfg.Kafka.SignalsTopic) == "" {
 		cfg.Kafka.SignalsTopic = common.DefaultSignalsTopic
 	}
@@ -146,6 +164,17 @@ func validate(cfg *common.AppConfig) error {
 	}
 	if cfg.Risk.PerTradeTargetPct <= 0 {
 		missing = append(missing, "risk.per_trade_target_pct")
+	}
+	if cfg.Postgres.Enabled {
+		if strings.TrimSpace(cfg.Postgres.User) == "" {
+			missing = append(missing, "postgres.user")
+		}
+		if strings.TrimSpace(cfg.Postgres.DBName) == "" {
+			missing = append(missing, "postgres.db_name")
+		}
+		if strings.TrimSpace(cfg.Postgres.TableName) == "" {
+			missing = append(missing, "postgres.table_name")
+		}
 	}
 	if len(missing) > 0 {
 		return fmt.Errorf("missing/invalid required config fields: %s", strings.Join(missing, ", "))

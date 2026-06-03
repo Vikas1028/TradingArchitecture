@@ -15,17 +15,29 @@
     "startup_replay_grace_sec": 300,
     "price_scale_divisor": 1.0
   },
+  "postgres": {
+    "enabled": true,
+    "host": "localhost",
+    "port": 5432,
+    "user": "vikasbhandekar",
+    "password": "",
+    "db_name": "Algo_trading",
+    "sslmode": "disable",
+    "table_name": "paper_engine_trades",
+    "max_conns": 8,
+    "min_conns": 1
+  },
   "trading": {
     "timezone": "Asia/Kolkata",
     "entry_start": "09:15",
     "entry_end": "15:15",
-    "eod_flat_time": "15:20",
+    "eod_flat_time": "15:29",
     "mtm_snapshot_interval_sec": 60,
     "pending_signal_max_age_sec": 180
   },
   "risk": {
     "capital_per_trade": 10000.0,
-    "max_trades_per_day": 10,
+    "max_trades_per_day": 100,
     "max_open_positions": 3,
     "max_daily_loss": 2000.0,
     "per_trade_sl_pct": 0.5,

@@ -25,6 +25,17 @@ type BrokerConfig struct {
 	AlertsSubject     string `json:"alerts_subject"`
 }
 
+type CollectorConfig struct {
+	Enabled             bool   `json:"enabled"`
+	IntervalSeconds     int    `json:"interval_seconds"`
+	RequestTimeoutSec   int    `json:"request_timeout_sec"`
+	LookbackHours       int    `json:"lookback_hours"`
+	MaxItemsPerSymbol   int    `json:"max_items_per_symbol"`
+	UserAgent           string `json:"user_agent"`
+	SearchQuerySuffix   string `json:"search_query_suffix"`
+	StartupFetchEnabled bool   `json:"startup_fetch_enabled"`
+}
+
 type RulesConfig struct {
 	WatchThreshold float64 `json:"watch_threshold"`
 	LongThreshold  float64 `json:"long_threshold"`
@@ -36,11 +47,12 @@ type SymbolsConfig struct {
 }
 
 type AppConfig struct {
-	Env     string        `json:"env"`
-	Service ServiceConfig `json:"service"`
-	Broker  BrokerConfig  `json:"broker"`
-	Symbols SymbolsConfig `json:"symbols"`
-	Rules   RulesConfig   `json:"rules"`
+	Env       string          `json:"env"`
+	Service   ServiceConfig   `json:"service"`
+	Broker    BrokerConfig    `json:"broker"`
+	Collector CollectorConfig `json:"collector"`
+	Symbols   SymbolsConfig   `json:"symbols"`
+	Rules     RulesConfig     `json:"rules"`
 }
 
 type RawNewsItem struct {

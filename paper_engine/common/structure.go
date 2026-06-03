@@ -18,6 +18,19 @@ type KafkaConfig struct {
 	PriceScaleDivisor     float64 `json:"price_scale_divisor"`
 }
 
+type PostgresConfig struct {
+	Enabled   bool   `json:"enabled"`
+	Host      string `json:"host"`
+	Port      int    `json:"port"`
+	User      string `json:"user"`
+	Password  string `json:"password"`
+	DBName    string `json:"db_name"`
+	SSLMode   string `json:"sslmode"`
+	TableName string `json:"table_name"`
+	MaxConns  int    `json:"max_conns"`
+	MinConns  int    `json:"min_conns"`
+}
+
 type TradingConfig struct {
 	Timezone               string `json:"timezone"`
 	EntryStart             string `json:"entry_start"`
@@ -37,10 +50,11 @@ type RiskConfig struct {
 }
 
 type AppConfig struct {
-	Env     string        `json:"env"`
-	Kafka   KafkaConfig   `json:"kafka"`
-	Trading TradingConfig `json:"trading"`
-	Risk    RiskConfig    `json:"risk"`
+	Env      string         `json:"env"`
+	Kafka    KafkaConfig    `json:"kafka"`
+	Postgres PostgresConfig `json:"postgres"`
+	Trading  TradingConfig  `json:"trading"`
+	Risk     RiskConfig     `json:"risk"`
 }
 
 type LoggerConfig struct {

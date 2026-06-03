@@ -14,6 +14,7 @@ type StrategyConfig struct {
 	SessionStart      string  `json:"session_start"`
 	OpeningCandleSlot int     `json:"opening_candle_slot"`
 	MoveThresholdPct  float64 `json:"move_threshold_pct"`
+	MaxTradesPerDay   int     `json:"max_trades_per_day"`
 }
 
 type AppConfig struct {

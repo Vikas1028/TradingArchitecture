@@ -16,6 +16,12 @@ const (
 	DefaultTicksTopic    = "ticks.raw"
 	DefaultTradesTopic   = "trades.paper"
 	DefaultPnlTopic      = "pnl.paper"
+	DefaultPGHost        = "localhost"
+	DefaultPGPort        = 5432
+	DefaultPGSSLMode     = "disable"
+	DefaultPGTableName   = "paper_engine_trades"
+	DefaultPGMaxConns    = 8
+	DefaultPGMinConns    = 1
 	DefaultCommitMs      = 1000
 	DefaultReplayGrace   = 120
 	DefaultPriceDivisor  = 1.0

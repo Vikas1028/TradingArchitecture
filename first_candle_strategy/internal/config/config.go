@@ -70,6 +70,9 @@ func applyDefaults(cfg *common.AppConfig) {
 	if cfg.Strategy.MoveThresholdPct == 0 {
 		cfg.Strategy.MoveThresholdPct = common.DefaultMoveThresholdPct
 	}
+	if cfg.Strategy.MaxTradesPerDay <= 0 {
+		cfg.Strategy.MaxTradesPerDay = common.DefaultMaxTradesPerDay
+	}
 }
 
 func validate(cfg *common.AppConfig) error {
@@ -91,6 +94,9 @@ func validate(cfg *common.AppConfig) error {
 	}
 	if cfg.Strategy.MoveThresholdPct <= 0 {
 		missing = append(missing, "strategy.move_threshold_pct(>0)")
+	}
+	if cfg.Strategy.MaxTradesPerDay <= 0 {
+		missing = append(missing, "strategy.max_trades_per_day(>0)")
 	}
 	if len(missing) > 0 {
 		return fmt.Errorf("missing/invalid required config fields: %s", strings.Join(missing, ", "))

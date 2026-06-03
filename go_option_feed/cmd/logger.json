@@ -1,0 +1,8 @@
+{
+  "enable": true,
+  "level": "INFO",
+  "format": "json",
+  "log_dir": "logs",
+  "file_name": "go_option_feed.log",
+  "console": true
+}

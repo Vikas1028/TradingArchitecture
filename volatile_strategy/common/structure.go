@@ -13,13 +13,16 @@ type KafkaConfig struct {
 }
 
 type StrategyConfig struct {
-	Timezone       string
-	SessionStart   string
-	SessionEnd     string
-	WindowMinutes  int
-	ConfirmMinutes int
-	RetracePct     float64
-	TopCount       int
+	Timezone                 string
+	SessionStart             string
+	SessionEnd               string
+	WindowMinutes            int
+	ConfirmMinutes           int
+	RetracePct               float64
+	TopCount                 int
+	MaxTradesPerDay          int
+	MaxTradesPerSymbolPerDay int
+	SymbolCooldownMinutes    int
 }
 
 type ServiceConfig struct {

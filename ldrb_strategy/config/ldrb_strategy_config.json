@@ -3,19 +3,19 @@
   "kafka": {
     "bootstrap_servers": "nats://127.0.0.1:4222",
     "group_id": "ldrb-strategy",
-    "stock_candles_topic": "candle.raw",
-    "index_candles_topic": "indices.raw",
+    "stock_candles_topic": "candle.raw.stock.1m",
+    "index_candles_topic": "indices.raw.index.1m",
     "signal_topic": "signals.strategy",
     "commit_interval_ms": 1000,
-    "startup_replay_grace_sec": 21600
+    "startup_replay_grace_sec": 0
   },
   "dependencies": {
-    "events_path": "/Users/vikasbhandekar/Desktop/TradingArchitecture/ldrb_strategy/data/events_next_day.json",
-    "volume_profile_path": "/Users/vikasbhandekar/Desktop/TradingArchitecture/ldrb_strategy/data/volume_profile_10d.json",
-    "turnover_ranking_path": "/Users/vikasbhandekar/Desktop/TradingArchitecture/stocks/nifty500_turnover.csv",
+    "events_path": "/Users/vikasbhandekar/live_services/ldrb_strategy/data/events_next_day.json",
+    "volume_profile_path": "/Users/vikasbhandekar/live_services/ldrb_strategy/data/volume_profile_10d.json",
+    "turnover_ranking_path": "/Users/vikasbhandekar/live_services/go_feed/stocks/nifty500_turnover.csv",
     "enable_safe_mode": true,
     "allow_rvol_fallback": true,
-    "skip_all_if_events_missing": true
+    "skip_all_if_events_missing": false
   },
   "strategy": {
     "timezone": "Asia/Kolkata",

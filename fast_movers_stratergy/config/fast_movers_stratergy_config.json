@@ -1,0 +1,33 @@
+{
+  "env": "prod",
+  "kafka": {
+    "bootstrap_servers": "nats://127.0.0.1:4222",
+    "group_id": "fast-movers-ticks-v1",
+    "ticks_topic": "ticks.raw",
+    "signal_topic": "signals.strategy",
+    "trades_topic": "trades.paper",
+    "trades_group_id": "fast-movers-trades-v1",
+    "commit_interval_ms": 1000,
+    "startup_replay_grace_sec": 0
+  },
+  "strategy": {
+    "timezone": "Asia/Kolkata",
+    "max_open_trades": 3,
+    "open_window_start": "09:15:00",
+    "open_window_end": "15:15:00",
+    "retrace_threshold_pct": 0.2,
+    "return_tolerance_pct": 0.05,
+    "reversal_trigger_pct": 0.5,
+    "burst_window_start": "09:15:00",
+    "burst_window_end": "15:15:00",
+    "burst_trigger_pct": 0.5,
+    "burst_confirmation_sec": 30,
+    "default_stop_loss_pct": 0.3,
+    "default_target_pct": 0.0,
+    "source_priority_stale_sec": 2
+  },
+  "service": {
+    "metrics_address": ":9116",
+    "dashboard_path": "/dashboard"
+  }
+}

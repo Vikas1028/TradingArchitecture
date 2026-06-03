@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>com.openmarketvolatility.service</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>/bin/zsh</string>
+		<string>-lc</string>
+		<string>until /usr/bin/nc -z 127.0.0.1 4222 &gt;/dev/null 2&gt;&amp;1; do sleep 2; done; exec /Users/vikasbhandekar/live_services/openmarketvolatility/cmd/openmarketvolatility/openmarketvolatility -config /Users/vikasbhandekar/live_services/openmarketvolatility/config/openmarketvolatility_config.json</string>
+	</array>
+	<key>WorkingDirectory</key>
+	<string>/Users/vikasbhandekar/live_services/openmarketvolatility</string>
+	<key>EnvironmentVariables</key>
+	<dict>
+		<key>PATH</key>
+		<string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+		<key>TZ</key>
+		<string>Asia/Kolkata</string>
+	</dict>
+	<key>RunAtLoad</key>
+	<true/>
+	<key>KeepAlive</key>
+	<true/>
+	<key>StandardOutPath</key>
+	<string>/Users/vikasbhandekar/live_services/openmarketvolatility/logs/launchd.stdout.log</string>
+	<key>StandardErrorPath</key>
+	<string>/Users/vikasbhandekar/live_services/openmarketvolatility/logs/launchd.stderr.log</string>
+</dict>
+</plist>

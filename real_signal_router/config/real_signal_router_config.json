@@ -1,0 +1,46 @@
+{
+  "env": "prod",
+  "nats": {
+    "url": "nats://127.0.0.1:4222",
+    "stream": "SIGNALS_STRATEGY",
+    "consumer": "real-signal-router-v1",
+    "input_subject": "signals.strategy",
+    "output_subject": "signals.real"
+  },
+  "postgres": {
+    "enabled": true,
+    "host": "localhost",
+    "port": 5432,
+    "user": "vikasbhandekar",
+    "password": "",
+    "db_name": "Algo_trading",
+    "sslmode": "disable",
+    "table_name": "real_engine_trades",
+    "max_open_signals": 3,
+    "query_timeout_sec": 2
+  },
+  "routing": {
+    "allowed_strategies": [
+      "openmarketvolatility_s2_30sec_burst",
+      "openmarketvolatility_s2_top_gainer_fallback"
+    ],
+    "entry_windows": [
+      {
+        "start": "09:16:00",
+        "end": "10:00:00"
+      },
+      {
+        "start": "15:00:00",
+        "end": "15:30:00"
+      }
+    ],
+    "timezone": "Asia/Kolkata",
+    "max_signal_age_sec": 30,
+    "dedupe_ttl_sec": 21600,
+    "route_reservation_sec": 45,
+    "fixed_quantity": 1,
+    "fixed_stop_loss_pct": 0.30,
+    "fixed_target_pct": 0.0,
+    "dry_run": false
+  }
+}

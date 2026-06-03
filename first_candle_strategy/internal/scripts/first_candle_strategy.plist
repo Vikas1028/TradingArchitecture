@@ -9,7 +9,7 @@
     <array>
         <string>/bin/zsh</string>
         <string>-lc</string>
-        <string>until /usr/bin/nc -z 127.0.0.1 9092 &gt;/dev/null 2&gt;&amp;1; do sleep 2; done; exec /Users/vikasbhandekar/live_services/first_candle_strategy/cmd/first_candle_strategy --config /Users/vikasbhandekar/live_services/first_candle_strategy/config/first_candle_strategy_config.json</string>
+        <string>until /usr/bin/nc -z 127.0.0.1 4222 &gt;/dev/null 2&gt;&amp;1; do sleep 2; done; exec /Users/vikasbhandekar/live_services/first_candle_strategy/cmd/first_candle_strategy/first_candle_strategy --config /Users/vikasbhandekar/live_services/first_candle_strategy/config/first_candle_strategy_config.json</string>
     </array>
 
     <key>WorkingDirectory</key>

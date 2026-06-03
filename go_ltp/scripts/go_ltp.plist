@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.go_ltp.service</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/zsh</string>
+        <string>-lc</string>
+        <string>until /usr/bin/nc -z 127.0.0.1 4222 &gt;/dev/null 2&gt;&amp;1; do sleep 2; done; exec /Users/vikasbhandekar/live_services/go_ltp/cmd/go_ltp</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/vikasbhandekar/live_services/go_ltp</string>
+
+    <key>StandardOutPath</key>
+    <string>/Users/vikasbhandekar/live_services/go_ltp/logs/launchd.stdout.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/vikasbhandekar/live_services/go_ltp/logs/launchd.stderr.log</string>
+
+    <key>RunAtLoad</key>
+    <false/>
+    <key>KeepAlive</key>
+    <false/>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    </dict>
+</dict>
+</plist>
