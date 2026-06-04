@@ -2,11 +2,11 @@
   "env": "prod",
   "kafka": {
     "bootstrap_servers": "nats://127.0.0.1:4222",
-    "group_id": "fast-movers-ticks-v1",
+    "group_id": "fast-movers-ticks-v3",
     "ticks_topic": "ticks.raw",
     "signal_topic": "signals.strategy",
     "trades_topic": "trades.paper",
-    "trades_group_id": "fast-movers-trades-v1",
+    "trades_group_id": "fast-movers-trades-v3",
     "commit_interval_ms": 1000,
     "startup_replay_grace_sec": 0
   },

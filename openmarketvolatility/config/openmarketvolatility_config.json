@@ -2,7 +2,7 @@
   "env": "prod",
   "kafka": {
     "bootstrap_servers": "nats://127.0.0.1:4222",
-    "group_id": "openmarketvolatility",
+    "group_id": "openmarketvolatility-v3",
     "ticks_topic": "ticks.raw",
     "signal_topic": "signals.strategy",
     "commit_interval_ms": 1000,

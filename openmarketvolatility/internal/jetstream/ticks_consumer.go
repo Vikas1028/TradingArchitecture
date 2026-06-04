@@ -32,13 +32,11 @@ func NewTicksConsumer(url, subject, group string, startupReplayGraceSec int) (*T
 		nats.BindStream(streamName(subject)),
 		nats.ManualAck(),
 		nats.AckExplicit(),
+		nats.DeliverNew(),
 	}
 	startupCutoff := time.Time{}
 	if startupReplayGraceSec > 0 {
 		startupCutoff = time.Now().Add(-time.Duration(startupReplayGraceSec) * time.Second)
-		opts = append(opts, nats.StartTime(startupCutoff))
-	} else {
-		opts = append(opts, nats.DeliverNew())
 	}
 	sub, err := js.PullSubscribe(strings.TrimSpace(subject)+".>", sanitizeName(group), opts...)
 	if err != nil {

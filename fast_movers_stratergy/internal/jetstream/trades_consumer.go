@@ -29,7 +29,7 @@ func NewTradesConsumer(url, subject, group string) (*TradesConsumer, error) {
 		nc.Close()
 		return nil, err
 	}
-	sub, err := js.PullSubscribe(strings.TrimSpace(subject), sanitizeName(group), nats.BindStream(streamName(subject)), nats.ManualAck(), nats.AckExplicit(), nats.DeliverLast())
+	sub, err := js.PullSubscribe(strings.TrimSpace(subject), sanitizeName(group), nats.BindStream(streamName(subject)), nats.ManualAck(), nats.AckExplicit(), nats.DeliverNew())
 	if err != nil {
 		nc.Close()
 		return nil, err

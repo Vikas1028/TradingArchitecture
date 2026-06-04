@@ -1,6 +1,7 @@
 package brokersync
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -194,6 +195,13 @@ func (s *Sync) runPositionsLoop(ctx context.Context) {
 }
 
 func (s *Sync) handleOrderUpdate(ctx context.Context, raw []byte) error {
+	raw = bytes.Trim(raw, "\x00\r\n\t ")
+	if len(raw) == 0 {
+		return nil
+	}
+	if raw[0] != '{' && raw[0] != '[' {
+		return nil
+	}
 	var envelope map[string]any
 	if err := json.Unmarshal(raw, &envelope); err != nil {
 		return err
